@@ -125,7 +125,7 @@ IMPORTANTE:
   async generateNewsPostImage(newsItem) {
     const imageUrl = agroDataService.getNewsImageUrl(newsItem);
     const newsUrl = agroDataService.getNewsUrl(newsItem);
-    const titulo = newsItem.Titulo.substring(0, 80);
+    const titulo = newsItem.Titulo; // Sin truncar para que salga completo
 
     let referenceImages = [];
     if (imageUrl) {
@@ -142,6 +142,7 @@ DESIGN SPECIFICATIONS:
 - Use the reference image as the main visual element, keep its agricultural context
 - Overlay a semi-transparent dark gradient at the bottom third of the image for text readability
 - Add the news headline as white bold text over the dark overlay area: "${titulo}"
+- IMPORTANT: The headline should be displayed completely. If it is long, wrap it into multiple lines using a clean, modern sans-serif font.
 - Add a small accent bar in green/teal above the headline
 - Bottom of image: white text "www.helpmeagro.com" and smaller text "${newsUrl}"
 - Clean, professional editorial/news aesthetic
