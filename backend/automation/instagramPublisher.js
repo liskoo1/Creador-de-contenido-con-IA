@@ -53,6 +53,22 @@ class InstagramPublisher {
       const creationId = createData.id;
       console.log(`[Instagram] Contenedor creado: ${creationId}`);
 
+      // Paso 1.5: Esperar a que el contenedor esté listo (Meta a veces necesita tiempo incluso para imágenes)
+      let isReady = false;
+      let attempts = 0;
+      while (!isReady && attempts < 10) {
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Esperar 3s
+        attempts++;
+        const checkUrl = `${baseUrl}/v25.0/${creationId}?fields=status_code&access_token=${accessToken}`;
+        const checkRes = await fetch(checkUrl);
+        const checkData = await checkRes.json();
+        if (checkData.status_code === 'FINISHED') {
+          isReady = true;
+        } else if (checkData.status_code === 'ERROR') {
+          throw new Error('Meta reportó un error al procesar la imagen.');
+        }
+      }
+
       // Paso 2: Publicar el contenedor
       const publishUrl = `${baseUrl}/v25.0/${targetId}/media_publish`;
       const publishResponse = await fetch(publishUrl, {
@@ -229,21 +245,19 @@ class InstagramPublisher {
       const creationId = createData.id;
       console.log(`[Instagram] Contenedor STORY creado: ${creationId}`);
 
-      // Paso 2: Si es vídeo, esperar a que se procese
-      if (mediaType === 'VIDEO') {
-        let isReady = false;
-        let attempts = 0;
-        const maxAttempts = 20;
-        while (!isReady && attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          attempts++;
-          const checkRes = await fetch(`${baseUrl}/v25.0/${creationId}?fields=status_code&access_token=${accessToken}`);
-          const checkData = await checkRes.json();
-          if (checkData.status_code === 'FINISHED') isReady = true;
-          else if (checkData.status_code === 'ERROR') throw new Error('Error procesando vídeo de Story.');
-        }
-        if (!isReady) throw new Error('Timeout procesando vídeo de Story.');
+      // Paso 2: Esperar a que se procese el contenedor en Meta
+      let isReady = false;
+      let attempts = 0;
+      const maxAttempts = mediaType === 'VIDEO' ? 30 : 10; // Videos necesitan más tiempo
+      while (!isReady && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        attempts++;
+        const checkRes = await fetch(`${baseUrl}/v25.0/${creationId}?fields=status_code&access_token=${accessToken}`);
+        const checkData = await checkRes.json();
+        if (checkData.status_code === 'FINISHED') isReady = true;
+        else if (checkData.status_code === 'ERROR') throw new Error(`Error procesando media de Story (${mediaType}).`);
       }
+      if (!isReady) throw new Error(`Timeout procesando media de Story (${mediaType}).`);
 
       // Paso 3: Publicar el contenedor
       const publishUrl = `${baseUrl}/v25.0/${targetId}/media_publish`;
