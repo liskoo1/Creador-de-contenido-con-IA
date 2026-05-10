@@ -17,16 +17,38 @@ class PublishingService {
     const publicBase = (process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
     const publicDir = process.env.PUBLIC_IMAGES_DIR;
 
-    if (!localPath || (typeof localPath === 'string' && localPath.startsWith('http'))) {
-      if (type === 'story') return await instagramPublisher.publishStory(localPath, extra);
-      if (type === 'reel') return await instagramPublisher.publishReel(localPath, extra);
-      if (type === 'carousel') return await instagramPublisher.publishCarousel(localPath, extra);
-      return await instagramPublisher.publishImage(localPath, extra);
+    // Normalizar localPath si es una URL local absoluta (ej: http://localhost:3001/output/img.png)
+    let pathsToProcess = localPath;
+    const serverUrl = (process.env.SERVER_URL || 'http://localhost:3001').trim();
+    
+    const normalizePath = (p) => {
+      if (typeof p === 'string' && p.startsWith(serverUrl)) {
+        return p.substring(serverUrl.length); // Devuelve '/output/img.png'
+      }
+      if (typeof p === 'string' && p.startsWith('http://localhost')) {
+        const urlObj = new URL(p);
+        return urlObj.pathname;
+      }
+      return p;
+    };
+
+    if (Array.isArray(pathsToProcess)) {
+      pathsToProcess = pathsToProcess.map(normalizePath);
+    } else {
+      pathsToProcess = normalizePath(pathsToProcess);
+    }
+
+    // Si sigue siendo una URL externa válida (ej: https://unsplash.com/...), publicar directamente
+    if (!pathsToProcess || (typeof pathsToProcess === 'string' && pathsToProcess.startsWith('http'))) {
+      if (type === 'story') return await instagramPublisher.publishStory(pathsToProcess, extra);
+      if (type === 'reel') return await instagramPublisher.publishReel(pathsToProcess, extra);
+      if (type === 'carousel') return await instagramPublisher.publishCarousel(pathsToProcess, extra);
+      return await instagramPublisher.publishImage(pathsToProcess, extra);
     }
 
     // --- Caso A: Carrusel (Array de imágenes) ---
-    if (Array.isArray(localPath)) {
-      const imageUrls = localPath.map(v => {
+    if (Array.isArray(pathsToProcess)) {
+      const imageUrls = pathsToProcess.map(v => {
         const fn = path.basename(v);
         if (publicDir) {
           const src = path.join(__dirname, '..', v.startsWith('/') ? `.${v}` : v);
@@ -42,18 +64,18 @@ class PublishingService {
     }
 
     // --- Caso B: Archivo Único ---
-    const fileName = path.basename(localPath);
+    const fileName = path.basename(pathsToProcess);
     const publicUrl = `${publicBase}/${fileName}`;
 
     if (!publicDir) {
       console.warn('[PublishingService] PUBLIC_IMAGES_DIR no configurado. Usando fallback URL.');
-      const fallbackUrl = `${publicBase}${localPath.startsWith('/') ? localPath : '/' + localPath}`;
+      const fallbackUrl = `${publicBase}${pathsToProcess.startsWith('/') ? pathsToProcess : '/' + pathsToProcess}`;
       if (type === 'story') return await instagramPublisher.publishStory(fallbackUrl, extra);
       if (type === 'reel') return await instagramPublisher.publishReel(fallbackUrl, extra);
       return await instagramPublisher.publishImage(fallbackUrl, extra);
     }
 
-    const source = path.join(__dirname, '..', localPath.startsWith('/') ? `.${localPath}` : localPath);
+    const source = path.join(__dirname, '..', pathsToProcess.startsWith('/') ? `.${pathsToProcess}` : pathsToProcess);
     const dest = path.join(publicDir, fileName);
 
     try {

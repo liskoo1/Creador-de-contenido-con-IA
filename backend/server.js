@@ -1,10 +1,22 @@
 const express = require('express');
 const cors = require('cors');
-const { v4: uuidv4 } = require('uuid');
-require('dotenv').config();
 const path = require('path');
-const multer = require('multer');
 const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
+
+// Cargar variables de entorno de forma robusta
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  require('dotenv').config({ path: envPath });
+  console.log(`\n\x1b[32m[Server] ✅ Archivo .env cargado correctamente.\x1b[0m`);
+} else {
+  console.warn(`\n\x1b[33m⚠️ [Server] Archivo .env no encontrado en: ${envPath}\x1b[0m`);
+}
+
+// Diagnóstico inmediato de URL pública
+const publicUrl = (process.env.PUBLIC_BASE_URL || 'http://localhost:3001').trim();
+console.log(`\x1b[32m[Server] 🌐 URL Pública detectada: ${publicUrl}\x1b[0m\n`);
 
 const orchestrator = require('./core/AgentOrchestrator');
 const knowledgeService = require('./services/knowledgeService');
