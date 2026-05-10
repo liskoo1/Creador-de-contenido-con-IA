@@ -1,0 +1,26 @@
+{
+  "name": "video-engine",
+  "version": "1.0.0",
+  "description": "Remotion engine for AI Content Swarm",
+  "scripts": {
+    "start": "remotion preview",
+    "build": "remotion render",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/captions": "4.0.454",
+    "@remotion/fonts": "^4.0.454",
+    "@remotion/google-fonts": "^4.0.457",
+    "@remotion/media": "4.0.454",
+    "@remotion/transitions": "4.0.454",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "remotion": "4.0.454"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.454",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}

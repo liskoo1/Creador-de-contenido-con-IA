@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Content Hub | Deep Knowledge Engine</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/autopilot.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Lateral -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>Knowledge Base</h2>
+            </div>
+            
+            <div id="knowledge-items" class="knowledge-list">
+            </div>
+
+            <div class="control-grid">
+                <button class="hub-btn" onclick="document.getElementById('file-input').click()">+ UPLOAD ASSETS</button>
+                <button class="hub-btn" onclick="promptAddUrl()">+ ADD WEB URL</button>
+                <button class="hub-btn lib-btn" onclick="openMediaLibrary()">📁 VIEW MEDIA LIBRARY</button>
+                <input type="file" id="file-input" style="display:none" multiple onchange="uploadFiles(this)">
+            </div>
+
+            <div class="sidebar-header" style="margin-top:20px">
+                <h2>Format Config</h2>
+            </div>
+            <div class="format-grid" id="type-selector">
+                <button class="format-btn active" data-type="single">POST</button>
+                <button class="format-btn" data-type="carousel">CAROUSEL</button>
+                <button class="format-btn" data-type="video">REEL</button>
+                <button class="format-btn" data-type="flyer">FLYER</button>
+                <button class="format-btn" data-type="audio-reel">🎙️ AUDIO REEL</button>
+            </div>
+
+            <div class="sidebar-header" style="margin-top:15px">
+                <h2>Aspect Ratio</h2>
+            </div>
+            <div class="format-grid" id="ratio-selector">
+                <button class="format-btn" data-ratio="9:16">9:16</button>
+                <button class="format-btn active" data-ratio="1:1">1:1</button>
+                <button class="format-btn" data-ratio="16:9">16:9</button>
+            </div>
+
+            <div class="sidebar-header" id="media-mode-header" style="margin-top:15px">
+                <h2>Media Mode</h2>
+            </div>
+            <div class="format-grid" id="media-selector">
+                <button class="format-btn active" data-media="image">IMAGE</button>
+                <button class="format-btn" data-media="video" id="video-mode-btn">VIDEO</button>
+            </div>
+            <div class="sidebar-header" id="engine-mode-header" style="margin-top:15px">
+                <h2>Engine Mode</h2>
+            </div>
+            <div class="format-grid" id="engine-selector">
+                <button class="format-btn active" data-engine="remotion">REMOTION</button>
+                <button class="format-btn" data-engine="direct">DIRECT AI</button>
+            </div>
+            <div class="sidebar-header" style="margin-top:15px">
+                <h2>Image Model</h2>
+            </div>
+            <div class="format-grid" id="image-model-selector">
+                <button class="format-btn active" data-image-model="google">GEMINI</button>
+                <button class="format-btn" data-image-model="openai">OPENAI</button>
+            </div>
+            <div class="status-panel">
+                <button class="hub-btn archive-btn" onclick="openArchive()">📁 SWARMS ARCHIVE</button>
+                <div class="sidebar-header" style="margin-top:15px">
+                    <h2>Agro Data</h2>
+                </div>
+                <button class="hub-btn" onclick="generatePriceStory()" style="border-color: #00e676; color: #00e676; width:100%; margin-bottom:8px;">📊 PRECIO DEL DIA</button>
+                <button class="hub-btn" onclick="generateNewsPost()" style="border-color: #ff9100; color: #ff9100; width:100%; margin-bottom:10px;">📰 NOTICIA DEL DIA</button>
+                <div id="status-badge" class="badge idle">SYSTEM ONLINE</div>
+                <p id="agent-thinking-mini" style="font-size: 0.7rem; margin-top: 10px; color: var(--text-dim);">Ready for mission...</p>
+            </div>
+        </aside>
+
+        <!-- Main Content: The Canvas -->
+        <main class="main-content">
+            <!-- Auto-Pilot Control Bar -->
+            <section class="autopilot-bar glass" id="autopilot-bar">
+                <div class="autopilot-left">
+                    <div class="autopilot-toggle-wrap">
+                        <label class="autopilot-switch">
+                            <input type="checkbox" id="autopilot-toggle">
+                            <span class="autopilot-slider"></span>
+                        </label>
+                        <span class="autopilot-label" id="autopilot-label">AUTO-PILOT OFF</span>
+                    </div>
+                    <div class="autopilot-status" id="autopilot-status">Sistema en espera</div>
+                </div>
+                <div class="autopilot-right">
+                    <button class="autopilot-btn" id="calendar-btn" onclick="openCalendar()">📅 CALENDARIO</button>
+                    <button class="autopilot-btn" id="force-plan-btn" onclick="forcePlan()">⚡ GENERAR PLAN</button>
+                </div>
+            </section>
+
+            <div class="workspace-layout">
+                <section class="result-canvas result-scroll">
+                    <div id="result-viewer">
+                        <div class="empty-state">READY_FOR_MISSION_INPUT...</div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Tactical Command Bar (Al final para layout pro) -->
+            <header class="command-bar glass">
+                <div id="ref-preview-container" class="ref-preview-container" style="display:none">
+                    <!-- Las miniaturas se generarán dinámicamente aquí -->
+                </div>
+                <div class="input-wrap">
+                    <span class="cmd-prefix">COMMAND_PROMPT ></span>
+                    <textarea id="briefing-input" placeholder="Introduce el briefing táctico o genera una idea..."></textarea>
+                    <div class="cmd-actions">
+                        <button id="attach-ref-btn" class="mini-suggest" onclick="document.getElementById('ref-file-input').click()" title="Adjuntar Imágenes de Referencia">📎 ADJUNTAR</button>
+                        <input type="file" id="ref-file-input" style="display:none" accept="image/*" multiple onchange="handleRefUpload(this)">
+                        <button id="suggest-btn" class="mini-suggest">AUTO_IDEAS</button>
+                        <button id="refine-btn" class="mini-suggest" onclick="refinePrompt()">OPTIMIZE_PROMPT</button>
+                    </div>
+                </div>
+                <!-- Audio Upload Zone (hidden by default, shown for audio-reel) -->
+                <div id="audio-upload-zone" style="display:none" class="input-wrap">
+                    <div id="audio-drop-area" style="display:flex; align-items:center; gap:15px; width:100%; padding:12px 20px; border:2px dashed var(--border); border-radius:10px; cursor:pointer; transition:border-color 0.3s;" onclick="document.getElementById('audio-file-input').click()">
+                        <span style="font-size:2rem;">🎙️</span>
+                        <div>
+                            <div style="font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--accent); letter-spacing:2px;">AUDIO_UPLOAD</div>
+                            <div id="audio-file-label" style="font-size:0.85rem; color:var(--text-dim); margin-top:4px;">Arrastra o haz clic para subir audio (.mp3, .wav, .m4a) — Máx 3 min</div>
+                        </div>
+                    </div>
+                    <input type="file" id="audio-file-input" style="display:none" accept="audio/*" onchange="handleAudioSelect(this)">
+                </div>
+                <button id="start-btn" class="primary-btn">RUN_SWARM</button>
+                <div id="status-badge" class="badge idle" style="margin-left:15px">ONLINE</div>
+            </header>
+        </main>
+    </div>
+
+    <!-- Modal: Media Library -->
+    <div id="media-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>PROJECT_MEDIA_LIBRARY v1.0</h2>
+                <button class="close-modal" onclick="closeMediaLibrary()">×</button>
+            </div>
+            <div id="media-grid" class="asset-grid">
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Archive -->
+    <div id="archive-modal" class="modal-overlay">
+        <div class="modal-content archive-content">
+            <div class="modal-header">
+                <h2>SWARMS_ARCHIVE_LOGS v1.0</h2>
+                <button class="close-modal" onclick="closeArchive()">×</button>
+            </div>
+            <div class="archive-toolbar">
+                <label class="archive-select-all-label">
+                    <input type="checkbox" id="archive-select-all" onchange="toggleSelectAll(this.checked)">
+                    <span>SELECCIONAR TODO</span>
+                </label>
+                <button class="archive-del-selected-btn" id="archive-del-selected-btn" onclick="deleteSelected()" disabled>
+                    🗑️ ELIMINAR SELECCIONADOS &nbsp;<span id="archive-selected-count">0</span>
+                </button>
+            </div>
+            <div id="archive-list" class="archive-list">
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Calendario del Auto-Pilot -->
+    <div id="calendar-modal" class="modal-overlay">
+        <div class="modal-content calendar-content">
+            <div class="modal-header">
+                <h2 id="calendar-title">📅 PLANNING_CALENDAR</h2>
+                <button class="close-modal" onclick="closeCalendar()">×</button>
+            </div>
+            <div id="calendar-grid" class="calendar-grid">
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
