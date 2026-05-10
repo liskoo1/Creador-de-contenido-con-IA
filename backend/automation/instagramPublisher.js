@@ -8,6 +8,37 @@ const path = require('path');
 class InstagramPublisher {
 
   /**
+   * Intenta publicar el contenedor con reintentos si Meta devuelve "Media ID is not available".
+   */
+  async _publishContainerWithRetry(baseUrl, targetId, creationId, accessToken) {
+    const publishUrl = `${baseUrl}/v25.0/${targetId}/media_publish`;
+    let attempts = 0;
+    const maxAttempts = 6; // ~30 segundos máximo
+
+    while (attempts < maxAttempts) {
+      const publishResponse = await fetch(publishUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creation_id: creationId, access_token: accessToken })
+      });
+      const publishData = await publishResponse.json();
+
+      if (!publishData.error) {
+        return publishData; // Éxito
+      }
+
+      if (publishData.error.message && publishData.error.message.includes('Media ID is not available')) {
+        attempts++;
+        console.log(`[Instagram] ⏳ Media ID no disponible aún en Meta. Reintentando en 5s... (Intento ${attempts}/${maxAttempts})`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      } else {
+        throw new Error(publishData.error.message); // Otro error real
+      }
+    }
+    throw new Error('Timeout esperando a que el Media ID esté disponible para publicación en Meta.');
+  }
+
+  /**
    * Publica una imagen con caption en Instagram.
    * @param {string} imageUrl - URL pública de la imagen (debe ser accesible por Meta).
    * @param {string} caption - Texto del post con hashtags.
@@ -70,20 +101,7 @@ class InstagramPublisher {
       }
 
       // Paso 2: Publicar el contenedor
-      const publishUrl = `${baseUrl}/v25.0/${targetId}/media_publish`;
-      const publishResponse = await fetch(publishUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creation_id: creationId,
-          access_token: accessToken
-        })
-      });
-      const publishData = await publishResponse.json();
-
-      if (publishData.error) {
-        throw new Error(publishData.error.message);
-      }
+      const publishData = await this._publishContainerWithRetry(baseUrl, targetId, creationId, accessToken);
 
       console.log(`\x1b[32m[Instagram] ✅ Publicado exitosamente. ID: ${publishData.id}\x1b[0m`);
       return { success: true, postId: publishData.id };
@@ -168,20 +186,7 @@ class InstagramPublisher {
       }
 
       // Paso 3: Publicar el contenedor
-      const publishUrl = `${baseUrl}/v25.0/${targetId}/media_publish`;
-      const publishResponse = await fetch(publishUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creation_id: creationId,
-          access_token: accessToken
-        })
-      });
-      const publishData = await publishResponse.json();
-
-      if (publishData.error) {
-        throw new Error(publishData.error.message);
-      }
+      const publishData = await this._publishContainerWithRetry(baseUrl, targetId, creationId, accessToken);
 
       console.log(`\x1b[32m[Instagram] ✅ REEL publicado exitosamente. ID: ${publishData.id}\x1b[0m`);
       return { success: true, postId: publishData.id, mediaType: 'reel' };
@@ -260,20 +265,7 @@ class InstagramPublisher {
       if (!isReady) throw new Error(`Timeout procesando media de Story (${mediaType}).`);
 
       // Paso 3: Publicar el contenedor
-      const publishUrl = `${baseUrl}/v25.0/${targetId}/media_publish`;
-      const publishResponse = await fetch(publishUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creation_id: creationId,
-          access_token: accessToken
-        })
-      });
-      const publishData = await publishResponse.json();
-
-      if (publishData.error) {
-        throw new Error(publishData.error.message);
-      }
+      const publishData = await this._publishContainerWithRetry(baseUrl, targetId, creationId, accessToken);
 
       console.log(`\x1b[32m[Instagram] ✅ STORY publicada exitosamente. ID: ${publishData.id}\x1b[0m`);
       return { success: true, postId: publishData.id, mediaType: 'story' };
@@ -336,19 +328,11 @@ class InstagramPublisher {
       });
       const carouselData = await carouselRes.json();
 
-      // Publicar
-      const publishRes = await fetch(`${baseUrl}/v25.0/${targetId}/media_publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creation_id: carouselData.id,
-          access_token: accessToken
-        })
-      });
-      const publishData = await publishRes.json();
+      // Publicar el carrusel
+      const publishData = await this._publishContainerWithRetry(baseUrl, targetId, carouselData.id, accessToken);
 
-      console.log(`\x1b[32m[Instagram] ✅ Carrusel publicado. ID: ${publishData.id}\x1b[0m`);
-      return { success: true, postId: publishData.id };
+      console.log(`\x1b[32m[Instagram] ✅ CARRUSEL publicado exitosamente. ID: ${publishData.id}\x1b[0m`);
+      return { success: true, postId: publishData.id, mediaType: 'carousel' };
 
     } catch (error) {
       console.error('[Instagram] Error en carrusel:', error.message);
