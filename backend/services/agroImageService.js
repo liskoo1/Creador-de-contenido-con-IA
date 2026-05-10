@@ -86,14 +86,13 @@ Genera el copy en formato JSON exacto (sin markdown):
     "hashtags": "#agricultura #andalucia #helpmeagro + 3 hashtags relevantes"
   },
   "instagram": {
-    "copy": "Texto para Instagram mas visual y directo, 1-2 frases impactantes",
+    "copy": "Texto para Instagram mas visual y directo, 1-2 frases impactantes, incluyendo el enlace al final",
     "hashtags": "#agricultura #andalucia #helpmeagro #preciosagricolas + 5 hashtags relevantes"
   }
 }
 
 IMPORTANTE:
-- El copy de Facebook debe incluir la URL: ${newsUrl}
-- El copy de Instagram NO debe incluir la URL (va en la bio)
+- Tanto el copy de Facebook como el de Instagram DEBEN incluir la URL: ${newsUrl}
 - Los hashtags deben ser relevantes al tema de la noticia
 - Tono profesional pero cercano, del sector agricola`;
 
@@ -109,7 +108,7 @@ IMPORTANTE:
           hashtags: '#agricultura #andalucia #helpmeagro'
         },
         instagram: {
-          copy: newsItem.Titulo,
+          copy: `${newsItem.Titulo}\n\nEnlace: ${newsUrl}`,
           hashtags: '#agricultura #andalucia #helpmeagro #preciosagricolas'
         }
       };
