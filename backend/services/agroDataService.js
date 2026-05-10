@@ -103,9 +103,9 @@ NUMERO ELEGIDO:`;
    * @returns {string} - URL publica
    */
   getNewsUrl(noticia) {
-    const base = process.env.HELPMEAGRO_PUBLIC_URL || 'https://www.helpmeagro.com';
-    const newsPath = process.env.HELPMEAGRO_NEWS_PATH || '/noticias/';
-    return `${base}${newsPath}${noticia.Id}`;
+    const base = (process.env.HELPMEAGRO_PUBLIC_URL || 'https://www.helpmeagro.com').replace(/\/+$/, '');
+    const slug = noticia.Slug || '';
+    return `${base}/noticia/${noticia.Id}/${slug}`;
   }
 
   /**
