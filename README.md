@@ -65,4 +65,4 @@ Este proyecto es una plataforma avanzada para la generación automatizada de con
 - No compartas nunca tus API Keys ni las subas a repositorios públicos.
 
 ## 📄 Licencia
-[Añadir licencia si corresponde]
+MIT
