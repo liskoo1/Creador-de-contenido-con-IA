@@ -819,7 +819,10 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
 
   try {
     if (post.visuals && post.visuals.length > 0) {
-      if (post.visuals.length > 1) {
+      // Price-story siempre se publica como historia temporal (story)
+      if (post.contentType === 'price-story') {
+        await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE');
+      } else if (post.visuals.length > 1) {
         await publishingService.publishViaBridge(post.visuals, 'carousel', caption);
       } else {
         await publishingService.publishViaBridge(post.visuals[0], 'image', caption);
