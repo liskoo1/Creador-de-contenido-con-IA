@@ -5,6 +5,7 @@ const fs = require('fs');
 /**
  * Pasarela de Aprobación Human-in-the-Loop.
  * Envía correos HTML interactivos con botones de Aprobar/Rechazar.
+ * Las imágenes se incrustan como attachments CID para que sean visibles en cualquier cliente de email.
  */
 class ApprovalGateway {
   constructor() {
@@ -14,7 +15,9 @@ class ApprovalGateway {
   _getTransporter() {
     if (!this.transporter) {
       this.transporter = nodemailer.createTransport({
-        service: 'gmail',
+        host: process.env.SMTP_HOST || 'smtp.dondominio.com',
+        port: parseInt(process.env.SMTP_PORT) || 587,
+        secure: false,
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS
@@ -25,15 +28,34 @@ class ApprovalGateway {
   }
 
   /**
+   * Resuelve una URL o ruta relativa a su ruta absoluta en disco.
+   */
+  _resolveFilePath(urlOrPath) {
+    if (!urlOrPath || typeof urlOrPath !== 'string') return null;
+    try {
+      let filePath = urlOrPath;
+      if (urlOrPath.startsWith('http')) {
+        const url = new URL(urlOrPath);
+        filePath = url.pathname;
+      }
+      const relative = filePath.replace(/^\/output\//, '').replace(/^output\//, '');
+      const absolute = path.join(__dirname, '..', 'output', relative);
+      return fs.existsSync(absolute) ? absolute : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Envía un correo HTML con el contenido generado y botones de aprobación.
-   * @param {object} post - El post guardado (con id, content, visuals, etc.)
+   * @param {object} post - El post guardado (con id, content, visuals, video, etc.)
    * @param {object} scheduleEntry - La entrada del calendario { day, hour, concept, format }
    */
   async sendApprovalEmail(post, scheduleEntry) {
-    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
+    const serverUrl = (process.env.SERVER_URL || 'http://localhost:3001').trim();
     const adminEmail = process.env.ADMIN_EMAIL;
 
-    if (!adminEmail || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    if (!adminEmail || !process.env.SMTP_USER || !process.env.SMTP_PASS || !process.env.SMTP_HOST) {
       console.warn('[ApprovalGateway] Credenciales SMTP no configuradas. Saltando envío de email.');
       return;
     }
@@ -45,9 +67,95 @@ class ApprovalGateway {
     const igCopy = post.content?.instagram?.copy || '';
     const fbHash = post.content?.facebook?.hashtags || '';
     const igHash = post.content?.instagram?.hashtags || '';
-    const imageUrl = post.visuals?.[0] || '';
-
     const hasCopy = fbCopy || igCopy;
+
+    // --- Construir attachments e imágenes incrustadas ---
+    const attachments = [];
+    let imagesHtml = '';
+    let videoHtml = '';
+
+    // Procesar imágenes (carrusel o imagen única)
+    const visuals = post.visuals || [];
+    if (visuals.length > 0) {
+      const isCarousel = visuals.length > 1;
+      
+      if (isCarousel) {
+        imagesHtml += `
+        <div style="background:#0a0a12;padding:20px;border-left:1px solid #2a2a4a;border-right:1px solid #2a2a4a;">
+          <p style="color:#e040fb;font-size:10px;letter-spacing:2px;margin:0 0 12px;text-align:center;">🎠 CARRUSEL (${visuals.length} SLIDES)</p>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;">`;
+      } else {
+        imagesHtml += `
+        <div style="background:#0a0a12;padding:20px;text-align:center;border-left:1px solid #2a2a4a;border-right:1px solid #2a2a4a;">`;
+      }
+
+      visuals.forEach((visualUrl, index) => {
+        const absPath = this._resolveFilePath(visualUrl);
+        const cid = `visual_${index}_${Date.now()}`;
+        const ext = absPath ? path.extname(absPath).toLowerCase().replace('.', '') : 'png';
+        const mimeType = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : 'image/png';
+
+        if (absPath) {
+          attachments.push({
+            filename: path.basename(absPath),
+            path: absPath,
+            cid: cid,
+            contentType: mimeType
+          });
+
+          if (isCarousel) {
+            const slideWidth = visuals.length > 4 ? '140px' : '180px';
+            imagesHtml += `
+            <div style="text-align:center;">
+              <img src="cid:${cid}" style="width:${slideWidth};border-radius:6px;border:1px solid #2a2a4a;" alt="Slide ${index + 1}">
+              <p style="color:#556;font-size:9px;margin:4px 0 0;">Slide ${index + 1}</p>
+            </div>`;
+          } else {
+            imagesHtml += `
+          <img src="cid:${cid}" style="max-width:100%;border-radius:8px;border:2px solid #2a2a4a;" alt="Contenido generado">`;
+          }
+          console.log(`[ApprovalGateway] Imagen ${index + 1} incrustada: ${path.basename(absPath)}`);
+        } else {
+          // Fallback: usar URL directa si no se encuentra en disco
+          const fullUrl = visualUrl.startsWith('http') ? visualUrl : `${serverUrl}${visualUrl.startsWith('/') ? '' : '/'}${visualUrl}`;
+          if (isCarousel) {
+            const slideWidth = visuals.length > 4 ? '140px' : '180px';
+            imagesHtml += `
+            <div style="text-align:center;">
+              <img src="${fullUrl}" style="width:${slideWidth};border-radius:6px;border:1px solid #2a2a4a;" alt="Slide ${index + 1}">
+              <p style="color:#556;font-size:9px;margin:4px 0 0;">Slide ${index + 1}</p>
+            </div>`;
+          } else {
+            imagesHtml += `
+          <img src="${fullUrl}" style="max-width:100%;border-radius:8px;border:2px solid #2a2a4a;" alt="Contenido generado">`;
+          }
+          console.warn(`[ApprovalGateway] Imagen ${index + 1} no encontrada en disco, usando URL: ${fullUrl}`);
+        }
+      });
+
+      if (isCarousel) {
+        imagesHtml += `
+          </div>
+        </div>`;
+      } else {
+        imagesHtml += `
+        </div>`;
+      }
+    }
+
+    // Procesar vídeo — solo mostrar enlace para abrir
+    if (post.video && post.video.url) {
+      const serverVideoUrl = post.video.url.startsWith('http') ? post.video.url : `${serverUrl}${post.video.url.startsWith('/') ? '' : '/'}${post.video.url}`;
+
+      videoHtml = `
+        <div style="background:#0d0d18;padding:25px;text-align:center;border-left:1px solid #2a2a4a;border-right:1px solid #2a2a4a;">
+          <p style="color:#ff1744;font-size:10px;letter-spacing:2px;margin:0 0 15px;">🎬 VÍDEO / REEL GENERADO</p>
+          <div style="background:rgba(255,23,68,0.08);border:1px solid rgba(255,23,68,0.3);border-radius:12px;padding:20px;">
+            <div style="font-size:40px;margin-bottom:10px;">▶️</div>
+            <a href="${serverVideoUrl}" target="_blank" style="display:inline-block;background:linear-gradient(135deg,#ff1744,#ff5252);color:#fff;text-decoration:none;padding:14px 40px;border-radius:50px;font-weight:bold;font-size:14px;letter-spacing:1px;">VER VÍDEO</a>
+          </div>
+        </div>`;
+    }
 
     const htmlBody = `
     <!DOCTYPE html>
@@ -105,12 +213,9 @@ class ApprovalGateway {
         ` : ''}
         ` : ''}
 
-        ${imageUrl ? `
-        <!-- Imagen -->
-        <div style="background:#0a0a12;padding:20px;text-align:center;border-left:1px solid #2a2a4a;border-right:1px solid #2a2a4a;">
-          <img src="${imageUrl}" style="max-width:100%;border-radius:8px;border:2px solid #2a2a4a;" alt="Contenido generado">
-        </div>
-        ` : ''}
+        <!-- Contenido Visual (imágenes/vídeo) -->
+        ${imagesHtml}
+        ${videoHtml}
 
         <!-- Botones de Acción -->
         <div style="background:#12121f;padding:30px;text-align:center;border-radius:0 0 16px 16px;border:1px solid #2a2a4a;border-top:none;">
@@ -131,13 +236,16 @@ class ApprovalGateway {
 
     try {
       const transporter = this._getTransporter();
-      await transporter.sendMail({
-        from: `"🤖 AI Auto-Pilot" <${process.env.SMTP_USER}>`,
+      const mailOptions = {
+        from: `"${process.env.SMTP_FROM_NAME || 'AI Auto-Pilot'}" <${process.env.SMTP_USER}>`,
         to: adminEmail,
         subject: `📋 Aprobación requerida — Día ${scheduleEntry.day} [${(scheduleEntry.format || '').toUpperCase()}]`,
-        html: htmlBody
-      });
-      console.log(`[ApprovalGateway] ✅ Email de aprobación enviado a ${adminEmail}`);
+        html: htmlBody,
+        attachments: attachments.length > 0 ? attachments : undefined
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log(`[ApprovalGateway] ✅ Email de aprobación enviado a ${adminEmail} (${attachments.length} imágenes incrustadas)`);
     } catch (error) {
       console.error('[ApprovalGateway] Error enviando email:', error.message);
     }

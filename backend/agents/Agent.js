@@ -1,6 +1,7 @@
 const geminiService = require('../services/geminiService');
 const openaiService = require('../services/openaiService');
 const skillLoader = require('../core/SkillLoader');
+const productContextService = require('../services/productContextService');
 
 /**
  * Clase base para representar a un Agente Especialista.
@@ -113,10 +114,13 @@ class Agent {
 
     // Ruta con skill: cargar instrucciones y generar texto
     const skillPrompt = await skillLoader.loadSkill(this.skillName);
+    const productContextSection = productContextService.getAsPromptSection();
     
     const finalPrompt = `
       INSTRUCCIONES DE LA HABILIDAD:
       ${skillPrompt}
+      
+      ${productContextSection ? productContextSection : ''}
       
       BRIEFING/INPUT DEL USUARIO:
       ${input}

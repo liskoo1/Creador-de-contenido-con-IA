@@ -12,6 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
     loadKnowledge();
     setupEventListeners();
     loadBotState();
+    loadProductContext();
+    setupProductContextListeners();
 });
 
 function setupEventListeners() {
@@ -178,12 +180,68 @@ async function loadBotState() {
                 : 'Sin posts pendientes';
         } else {
             label.textContent = 'AUTO-PILOT OFF';
-            label.textContent = 'AUTO-PILOT OFF';
             label.classList.remove('autopilot-active-label');
             status.textContent = 'Sistema en modo manual';
         }
+
+        renderAllowedFormats(state.allowedFormats);
     } catch (e) {
         console.error('Error cargando estado del bot:', e);
+    }
+}
+
+const DEFAULT_FORMATS = [
+    { format: 'single', mediaType: 'image', label: 'Post (Imagen Única)' },
+    { format: 'carousel', mediaType: 'image', label: 'Carrusel (Imágenes)' },
+    { format: 'carousel', mediaType: 'video', label: 'Carrusel (Vídeos IA)' },
+    { format: 'video', mediaType: 'image', label: 'Reel (Imágenes Animadas)' },
+    { format: 'video', mediaType: 'video', label: 'Reel (Clips Vídeo IA)' }
+];
+
+function renderAllowedFormats(allowedFormats) {
+    const container = document.getElementById('format-checkboxes');
+    if (!container) return;
+    
+    const activeFormats = allowedFormats || DEFAULT_FORMATS.map(f => ({ format: f.format, mediaType: f.mediaType }));
+    
+    container.innerHTML = DEFAULT_FORMATS.map((def, idx) => {
+        const isActive = activeFormats.some(f => f.format === def.format && f.mediaType === def.mediaType);
+        return `
+            <label class="config-checkbox-label">
+                <input type="checkbox" value='{"format":"${def.format}","mediaType":"${def.mediaType}"}' ${isActive ? 'checked' : ''} onchange="saveAllowedFormats()">
+                <span>${def.label}</span>
+            </label>
+        `;
+    }).join('');
+}
+
+async function saveAllowedFormats() {
+    const container = document.getElementById('format-checkboxes');
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+    const formats = [];
+    
+    checkboxes.forEach(cb => {
+        if (cb.checked) {
+            formats.push(JSON.parse(cb.value));
+        }
+    });
+
+    if (formats.length === 0) {
+        alert("Debes seleccionar al menos una combinación de formato.");
+        // Revertir a default visualmente
+        renderAllowedFormats(DEFAULT_FORMATS.map(f => ({ format: f.format, mediaType: f.mediaType })));
+        return;
+    }
+
+    try {
+        await fetch(`${API_BASE}/bot/formats`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ formats })
+        });
+        addThought('Auto-Pilot', `Configuración de formatos actualizada (${formats.length} permitidos).`);
+    } catch (e) {
+        console.error('Error guardando configuracion de formatos:', e);
     }
 }
 
@@ -221,6 +279,9 @@ async function forcePlan() {
    CALENDARIO
    ============================================ */
 
+let currentSchedule = [];
+let editingDay = null;
+
 async function openCalendar() {
     document.getElementById('calendar-modal').style.display = 'flex';
     renderCalendar();
@@ -228,6 +289,7 @@ async function openCalendar() {
 
 function closeCalendar() {
     document.getElementById('calendar-modal').style.display = 'none';
+    closeDayEditor();
 }
 
 async function renderCalendar() {
@@ -251,16 +313,16 @@ async function renderCalendar() {
     });
     
     // Obtener planificación
-    let schedule = [];
     try {
         const response = await fetch(`${API_BASE}/bot/schedule`);
-        schedule = await response.json();
+        currentSchedule = await response.json();
     } catch (e) {
         console.error('Error cargando schedule:', e);
+        currentSchedule = [];
     }
     
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const firstDayOfWeek = (new Date(year, month, 1).getDay() + 6) % 7; // Lunes = 0
+    const firstDayOfWeek = (new Date(year, month, 1).getDay() + 6) % 7;
     
     // Celdas vacías
     for (let i = 0; i < firstDayOfWeek; i++) {
@@ -276,29 +338,205 @@ async function renderCalendar() {
         
         if (day === now.getDate()) cell.classList.add('calendar-day-today');
         
-        const entry = schedule.find(e => e.day === day);
+        const entries = currentSchedule.filter(e => e.day === day);
         
         let innerHtml = `<div class="calendar-day-number">${day}</div>`;
         
-        if (entry) {
+        if (entries.length > 0) {
             cell.classList.add('calendar-has-post');
-            const tagClass = `calendar-tag-${entry.format}`;
-            const statusClass = `calendar-status-${entry.status}`;
-            const statusLabels = {
-                planned: '⏳', generating: '⚙️', pending_approval: '📧', 
-                approved: '✅', published: '🟢', rejected: '❌'
-            };
             
-            innerHtml += `
-                <span class="calendar-post-status ${statusClass}">${statusLabels[entry.status] || ''}</span>
-                <span class="calendar-post-tag ${tagClass}">${entry.format.toUpperCase()}</span>
-                <div class="calendar-post-concept">${entry.concept || ''}</div>
-                <div class="calendar-post-hour">🕐 ${entry.hour}</div>
-            `;
+            entries.forEach((entry, idx) => {
+                const tagClass = `calendar-tag-${entry.format}`;
+                const statusClass = `calendar-status-${entry.status}`;
+                const statusLabels = {
+                    planned: '⏳', generating: '⚙️', pending_approval: '📧', 
+                    approved: '✅', published: '🟢', rejected: '❌'
+                };
+                
+                const isLast = idx === entries.length - 1;
+                const borderStyle = isLast ? '' : 'border-bottom: 1px solid rgba(255,255,255,0.05); margin-bottom: 6px; padding-bottom: 6px;';
+                
+                const isAgro = entry.format === 'price-story' || entry.format === 'news-post';
+                const conceptHtml = isAgro ? '' : `<div class="calendar-post-concept" style="-webkit-line-clamp: 1;">${entry.concept || ''}</div>`;
+                
+                innerHtml += `
+                    <div style="${borderStyle}">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+                            <span class="calendar-post-tag ${tagClass}" style="margin:0;">${entry.format.toUpperCase()}</span>
+                            <span class="calendar-post-status ${statusClass}" style="position:static; padding:2px 4px; font-size:0.6rem;">${statusLabels[entry.status] || ''}</span>
+                        </div>
+                        ${conceptHtml}
+                        <div class="calendar-post-hour">🕐 ${entry.hour}</div>
+                    </div>
+                `;
+            });
         }
         
         cell.innerHTML = innerHtml;
+        cell.style.cursor = 'pointer';
+        cell.addEventListener('click', () => openDayEditor(day));
         grid.appendChild(cell);
+    }
+}
+
+function openDayEditor(day) {
+    editingDay = day;
+    const editor = document.getElementById('day-editor');
+    editor.classList.remove('hidden');
+
+    const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    const now = new Date();
+    document.getElementById('day-editor-title').textContent = `${day} de ${monthNames[now.getMonth()]}`;
+
+    const entries = currentSchedule.filter(e => e.day === day);
+    let entry = entries.find(e => e.format !== 'price-story' && e.format !== 'news-post');
+    if (!entry && entries.length > 0) entry = entries[0];
+
+    if (entry) {
+        document.getElementById('edit-hour').value = entry.hour || '12:00';
+        document.getElementById('edit-format').value = entry.format || 'single';
+        document.getElementById('edit-media').value = entry.mediaType || (entry.format === 'video' ? 'video' : 'image');
+        document.getElementById('edit-ratio').value = entry.aspectRatio || '1:1';
+        document.getElementById('edit-concept').value = entry.concept || '';
+        document.getElementById('edit-angle').value = entry.angle || '';
+        document.getElementById('edit-briefing').value = entry.briefing || '';
+        document.getElementById('edit-status').value = entry.status || 'planned';
+
+        const statusInfo = document.getElementById('edit-status-info');
+        if (entry.postId) {
+            statusInfo.innerHTML = `<span class="status-linked">🔗 Post ID: ${entry.postId}</span>`;
+        } else {
+            statusInfo.innerHTML = `<span class="status-unlinked">Sin post generado aún</span>`;
+        }
+
+        // Mostrar botón GENERAR solo si el estado es 'planned'
+        const generateBtn = document.getElementById('generate-btn');
+        generateBtn.style.display = entry.status === 'planned' ? 'block' : 'none';
+    } else {
+        document.getElementById('edit-hour').value = '12:00';
+        document.getElementById('edit-format').value = 'single';
+        document.getElementById('edit-media').value = 'image';
+        document.getElementById('edit-ratio').value = '1:1';
+        document.getElementById('edit-concept').value = '';
+        document.getElementById('edit-angle').value = '';
+        document.getElementById('edit-briefing').value = '';
+        document.getElementById('edit-status').value = 'planned';
+        document.getElementById('edit-status-info').innerHTML = '';
+
+        // Nueva entrada: mostrar botón GENERAR
+        document.getElementById('generate-btn').style.display = 'none';
+    }
+
+    // Highlight del día seleccionado
+    document.querySelectorAll('.calendar-day').forEach(c => c.classList.remove('calendar-day-selected'));
+    const cells = document.querySelectorAll('.calendar-day:not(.calendar-day-empty)');
+    cells.forEach(c => {
+        const num = parseInt(c.querySelector('.calendar-day-number')?.textContent);
+        if (num === day) c.classList.add('calendar-day-selected');
+    });
+}
+
+function closeDayEditor() {
+    editingDay = null;
+    document.getElementById('day-editor').classList.add('hidden');
+    document.querySelectorAll('.calendar-day').forEach(c => c.classList.remove('calendar-day-selected'));
+}
+
+async function saveDayEntry() {
+    if (!editingDay) return;
+
+    const updates = {
+        hour: document.getElementById('edit-hour').value,
+        format: document.getElementById('edit-format').value,
+        mediaType: document.getElementById('edit-media').value,
+        aspectRatio: document.getElementById('edit-ratio').value,
+        concept: document.getElementById('edit-concept').value,
+        angle: document.getElementById('edit-angle').value,
+        briefing: document.getElementById('edit-briefing').value,
+        status: document.getElementById('edit-status').value
+    };
+
+    try {
+        const res = await fetch(`${API_BASE}/bot/schedule/${editingDay}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        const data = await res.json();
+        if (data.success) {
+            await renderCalendar();
+            openDayEditor(editingDay);
+        }
+    } catch (e) {
+        console.error('Error guardando entrada:', e);
+    }
+}
+
+async function deleteDayEntry() {
+    if (!editingDay) return;
+    if (!confirm(`¿Eliminar la planificación del día ${editingDay}?`)) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/bot/schedule/${editingDay}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            closeDayEditor();
+            await renderCalendar();
+        }
+    } catch (e) {
+        console.error('Error eliminando entrada:', e);
+    }
+}
+
+async function executeDayEntry() {
+    if (!editingDay) return;
+    const generateBtn = document.getElementById('generate-btn');
+    if (!confirm(`¿Generar contenido para el día ${editingDay} ahora?`)) return;
+
+    generateBtn.disabled = true;
+    generateBtn.textContent = '⏳ GENERANDO...';
+
+    try {
+        const res = await fetch(`${API_BASE}/bot/execute/${editingDay}`, { method: 'POST' });
+        const data = await res.json();
+
+        if (data.success) {
+            // Polling: esperar a que el estado cambie de 'generating' a 'pending_approval'
+            let attempts = 0;
+            const maxAttempts = 120; // ~2 minutos
+            const poll = setInterval(async () => {
+                attempts++;
+                try {
+                    const schedRes = await fetch(`${API_BASE}/bot/schedule`);
+                    const schedule = await schedRes.json();
+                    const entry = schedule.find(e => e.day === editingDay);
+
+                    if (entry && entry.status !== 'generating') {
+                        clearInterval(poll);
+                        generateBtn.disabled = false;
+                        generateBtn.textContent = '🚀 GENERAR';
+                        await renderCalendar();
+                        openDayEditor(editingDay);
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(poll);
+                        generateBtn.disabled = false;
+                        generateBtn.textContent = '🚀 GENERAR';
+                        alert('Tiempo de espera agotado. Revisa el estado en el calendario.');
+                    }
+                } catch (e) {
+                    console.error('Error en polling:', e);
+                }
+            }, 2000);
+        } else {
+            alert(data.error || 'Error al iniciar la generación');
+            generateBtn.disabled = false;
+            generateBtn.textContent = '🚀 GENERAR';
+        }
+    } catch (e) {
+        console.error('Error ejecutando entrada:', e);
+        alert('Error de conexión');
+        generateBtn.disabled = false;
+        generateBtn.textContent = '🚀 GENERAR';
     }
 }
 
@@ -1043,5 +1281,166 @@ async function generateNewsPost() {
         addThought('System', `Error generando noticia: ${e.message}`);
         alert('Error: ' + e.message);
         updateStatus('SYSTEM ONLINE', 'idle');
+    }
+}
+
+/* ============================================
+   PRODUCT CONTEXT EDITOR
+   ============================================ */
+
+function setupProductContextListeners() {
+    const textarea = document.getElementById('product-context-textarea');
+    if (textarea) {
+        textarea.addEventListener('input', () => {
+            const count = textarea.value.length;
+            document.getElementById('product-char-count').textContent = count;
+        });
+
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+                textarea.selectionStart = textarea.selectionEnd = start + 2;
+            }
+        });
+    }
+
+    // Restaurar estado abierto/cerrado
+    const savedState = localStorage.getItem('productContextOpen');
+    if (savedState === 'true') {
+        toggleProductContext(true);
+    }
+}
+
+function toggleProductContext(forceOpen = false) {
+    const body = document.getElementById('product-context-body');
+    const header = document.querySelector('.product-context-header');
+    const h3 = header.querySelector('h3');
+    const isOpen = body.classList.contains('open');
+    
+    if (forceOpen && isOpen) return;
+
+    if (isOpen) {
+        body.classList.remove('open');
+        header.classList.remove('open');
+        h3.textContent = '▶ Product Context';
+        localStorage.setItem('productContextOpen', 'false');
+    } else {
+        body.classList.add('open');
+        header.classList.add('open');
+        h3.textContent = '▼ Product Context';
+        localStorage.setItem('productContextOpen', 'true');
+    }
+}
+
+function formatText(type) {
+    const textarea = document.getElementById('product-context-textarea');
+    if (!textarea) return;
+    
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = textarea.value.substring(start, end);
+    let replacement = '';
+    
+    switch (type) {
+        case 'bold':
+            replacement = `**${selected || 'texto en negrita'}**`;
+            break;
+        case 'heading':
+            replacement = `\n## ${selected || 'Título de sección'}\n`;
+            break;
+        case 'list':
+            replacement = `\n- ${selected || 'Elemento de lista'}`;
+            break;
+        case 'link':
+            replacement = `[${selected || 'texto del enlace'}](URL)`;
+            break;
+    }
+    
+    textarea.value = textarea.value.substring(0, start) + replacement + textarea.value.substring(end);
+    textarea.focus();
+    textarea.selectionStart = start + replacement.length;
+    textarea.selectionEnd = start + replacement.length;
+    
+    // Trigger input event to update char count
+    textarea.dispatchEvent(new Event('input'));
+}
+
+async function loadProductContext() {
+    try {
+        const response = await fetch(`${API_BASE}/product-context`);
+        const data = await response.json();
+        
+        // Fill metadata fields
+        const meta = data.metadata || {};
+        document.getElementById('product-name').value = meta.productName || '';
+        document.getElementById('product-industry').value = meta.industry || '';
+        document.getElementById('product-website').value = meta.website || '';
+        document.getElementById('product-hashtags').value = meta.defaultHashtags || '';
+        
+        // Fill context textarea
+        const textarea = document.getElementById('product-context-textarea');
+        if (textarea && data.context) {
+            textarea.value = data.context;
+            document.getElementById('product-char-count').textContent = data.context.length;
+        }
+        
+        // Update status badge
+        updateProductContextStatus(data);
+        
+    } catch (e) {
+        console.error('Error cargando contexto de producto:', e);
+    }
+}
+
+function updateProductContextStatus(data) {
+    const statusEl = document.getElementById('product-context-status');
+    const hasContext = (data.context && data.context.trim().length > 0) || 
+                      (data.metadata?.productName && data.metadata.productName.trim().length > 0);
+    
+    if (hasContext) {
+        statusEl.textContent = 'CONFIGURADO';
+        statusEl.className = 'product-context-status active';
+    } else {
+        statusEl.textContent = 'NO CONFIGURADO';
+        statusEl.className = 'product-context-status empty';
+    }
+}
+
+async function saveProductContext() {
+    const btn = document.getElementById('product-context-save-btn');
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ GUARDANDO...';
+    btn.classList.add('saving');
+    
+    try {
+        const contextText = document.getElementById('product-context-textarea').value;
+        const metadata = {
+            productName: document.getElementById('product-name').value,
+            industry: document.getElementById('product-industry').value,
+            website: document.getElementById('product-website').value,
+            defaultHashtags: document.getElementById('product-hashtags').value
+        };
+        
+        const response = await fetch(`${API_BASE}/product-context`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ context: contextText, metadata })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            updateProductContextStatus(result.data);
+            addThought('System', 'Contexto de producto guardado. Todos los agentes ahora usarán este contexto.');
+        }
+    } catch (e) {
+        console.error('Error guardando contexto:', e);
+        addThought('System', 'Error guardando contexto de producto.');
+    } finally {
+        btn.textContent = originalText;
+        btn.classList.remove('saving');
     }
 }

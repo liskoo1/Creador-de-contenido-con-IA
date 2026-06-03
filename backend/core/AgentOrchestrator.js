@@ -2,6 +2,8 @@ const path = require('path');
 const fs = require('fs');
 const Agent = require('../agents/Agent');
 const knowledgeService = require('../services/knowledgeService');
+const productContextService = require('../services/productContextService');
+const geminiService = require('../services/geminiService');
 const videoService = require('../services/videoService');
 const EventEmitter = require('events');
 
@@ -154,11 +156,41 @@ class AgentOrchestrator {
       console.warn(`[Swarm] ⚠️ Se detectaron URLs pero no se pudo extraer contenido. El contenido puede no reflejar la URL.`);
     }
 
+    // --- FASE 0.5: HASHTAGS TRENDING CON GROUNDING ---
+    const productMeta = productContextService.getMetadata();
+    const productIndustry = productMeta.industry || '';
+    const productName = productMeta.productName || '';
+    let trendingHashtagsContext = '';
+
+    try {
+      console.log(`[Swarm] Buscando hashtags trending para "${productIndustry}" con Grounding...`);
+      const hashtagQuery = `hashtags más populares y virales ahora en Instagram para ${productIndustry}${productName ? ' ' + productName : ''}. Busca los hashtags con mayor volumen y engagement actual para contenido de marketing.`;
+      const hashtagResearch = await geminiService.generateTextWithGrounding(hashtagQuery, process.env.GEMINI_TEXT_GROUNDING_MODEL || 'gemini-3-flash-preview', { temperature: 0.4 });
+      if (hashtagResearch && hashtagResearch.length > 30) {
+        trendingHashtagsContext = `\n\n🔥 HASHTAGS TRENDING EN INSTAGRAM (datos de Google Search en tiempo real):\n${hashtagResearch}\nINSTRUCCIÓN: Selecciona los 10-15 hashtags más relevantes y virales de esta lista para tu contenido. Combina hashtags de alto volumen con hashtags de nicho específicos al tema del post. NO uses todos, filtra los mejores.`;
+        console.log(`[Swarm] Hashtags trending obtenidos (${hashtagResearch.length} chars).`);
+      }
+    } catch (err) {
+      console.warn(`[Swarm] No se pudieron obtener hashtags trending: ${err.message}`);
+    }
+
     // --- FASE 1: ESCRITURA ---
     if (contentType !== 'flyer') {
       console.log(`[Swarm] Fase 1: Redacción estratégica...`);
       const cleanBrandContext = knowledgeService.getAllAsText().split("ARCHIVOS Y ACTIVOS:")[0];
+      const productContextSection = productContextService.getAsPromptSection();
       let writingPrompt = `BRIEFING: ${briefing}\nFORMATO: ${contentType}\nRATIO: ${aspectRatio}`;
+      
+      // Inyectar hashtags trending SIEMPRE
+      if (trendingHashtagsContext) {
+        writingPrompt += trendingHashtagsContext;
+      }
+      
+      // Inyectar contexto de producto SIEMPRE como sección prioritaria
+      if (productContextSection) {
+        writingPrompt += `\n\n${productContextSection}`;
+        writingPrompt += `\nINSTRUCCIÓN: El contenido que generes DEBE estar sesgado hacia el producto/servicio descrito arriba. Usa su tono, su terminología y sus beneficios clave. NO generes contenido genérico.\n`;
+      }
       
       if (projectState.researchData) {
         const rd = projectState.researchData;
@@ -212,9 +244,15 @@ class AgentOrchestrator {
 
     // --- FASE 3: GENERACIÓN VISUAL ---
     // Usar effectiveBriefing (basado en URL si existe) en lugar del briefing crudo
-    const visualBriefing = effectiveBriefing.includes("DIRECCIÓN VISUAL:") 
+    const productMetaForVisuals = productContextService.getMetadata();
+    let visualBriefing = effectiveBriefing.includes("DIRECCIÓN VISUAL:") 
       ? effectiveBriefing.split("DIRECCIÓN VISUAL:")[1].split("STORYTELLING:")[0].trim()
       : effectiveBriefing;
+
+    // Enriquecer el visual briefing con metadatos del producto para sesgo visual
+    if (productMetaForVisuals.productName || productMetaForVisuals.industry) {
+      visualBriefing += `\nPRODUCT CONTEXT: ${productMetaForVisuals.productName || ''} — ${productMetaForVisuals.industry || ''}. Visual style must be consistent with this product's brand identity.`;
+    }
 
     console.log(`[Swarm] Optimizando prompt visual...`);
     let optimizerInput = visualBriefing;
@@ -278,9 +316,19 @@ class AgentOrchestrator {
           
           Devuelve SOLO el JSON sin markdown:
           {
+            "characterProfile": "Short character profile description in English (if any people are present, e.g. A modern organic farmer in his 30s, clean shaved, wearing a clean navy polo shirt, professional and confident look). If no characters are involved, use null.",
             "visualDirective": { "colorPalette": "...", "photographyStyle": "...", "lightingSetup": "..." },
             "scenes": [
-              { "promptVisual": "...", "title": "...", "subtitle": "...", "mood": "...", "animationStyle": "cinematic", "requiredAsset": null }
+              { 
+                "promptVisual": "Visual description in English...", 
+                "spokenDialog": "Spoken dialogue in Spanish by the character (if the character speaks in this scene, otherwise null)...",
+                "voiceOver": "Background voice-over text in Spanish (if any, otherwise null)...",
+                "title": "...", 
+                "subtitle": "...", 
+                "mood": "...", 
+                "animationStyle": "cinematic", 
+                "requiredAsset": null 
+              }
             ]
           }
         `, { briefing: effectiveBriefing });
@@ -293,11 +341,21 @@ class AgentOrchestrator {
 
         // 5. Optimizar TODOS los prompts primero (batch)
         const optimizedPrompts = await Promise.all(
-          plannedScenes.map((sp, i) => {
+          plannedScenes.map(async (sp, i) => {
             const refs = this._filterReferences(sp.promptVisual, sp.requiredAsset, allReferences);
             const directive = remotionPlan?.visualDirective || visualDirective;
-            const enriched = `${sp.promptVisual}. ESTILO VISUAL OBLIGATORIO: ${directive.photographyStyle || 'hyper-realistic'}. ILUMINACIÓN: ${directive.lightingSetup || 'cinematic'}. PALETA: ${directive.colorPalette || 'warm'}.`;
-            return this._optimizeScenePrompt(enriched, refs, i + 1, totalScenes, aspectRatio);
+            
+            // Incluir el characterProfile en la optimización del prompt visual
+            const characterInfo = remotionPlan?.characterProfile ? `Subject is ${remotionPlan.characterProfile}. ` : '';
+            const enriched = `${characterInfo}${sp.promptVisual}. ESTILO VISUAL OBLIGATORIO: ${directive.photographyStyle || 'hyper-realistic'}. ILUMINACIÓN: ${directive.lightingSetup || 'cinematic'}. PALETA: ${directive.colorPalette || 'warm'}.`;
+            
+            let optimized = await this._optimizeScenePrompt(enriched, refs, i + 1, totalScenes, aspectRatio);
+            
+            // Inyectar la instrucción de diálogo hablado para el lip-sync después de optimizar
+            if (sp.spokenDialog) {
+              optimized = `${optimized}. The character in the video is looking directly at the camera and speaking in clear, native Castilian Spanish from Spain (Español de España) with a natural and professional accent. The character's exact spoken dialogue is: "${sp.spokenDialog}". Sychronize lips and voice generation to this Spanish speech.`;
+            }
+            return optimized;
           })
         );
 
@@ -666,9 +724,9 @@ class AgentOrchestrator {
     if (!Array.isArray(raw) || raw.length === 0) {
       console.warn(`[Swarm] ⚠️ Plan de escenas vacío, usando fallback de 3 escenas.`);
       return [
-        { promptVisual: fallbackPrompt, title: 'DESCUBRE', subtitle: 'La nueva forma de gestionar', mood: 'inspiring', animationStyle: 'cinematic', requiredAsset: null },
-        { promptVisual: fallbackPrompt, title: 'CONTROLA TODO', subtitle: 'Desde tu móvil', mood: 'epic', animationStyle: 'slide-up', requiredAsset: 'dashboard' },
-        { promptVisual: fallbackPrompt, title: 'EMPIEZA HOY', subtitle: 'Pruébalo gratis', mood: 'inspiring', animationStyle: 'zoom-reveal', requiredAsset: 'logo' },
+        { promptVisual: fallbackPrompt, spokenDialog: null, voiceOver: null, title: 'DESCUBRE', subtitle: 'La nueva forma de gestionar', mood: 'inspiring', animationStyle: 'cinematic', requiredAsset: null },
+        { promptVisual: fallbackPrompt, spokenDialog: null, voiceOver: null, title: 'CONTROLA TODO', subtitle: 'Desde tu móvil', mood: 'epic', animationStyle: 'slide-up', requiredAsset: 'dashboard' },
+        { promptVisual: fallbackPrompt, spokenDialog: null, voiceOver: null, title: 'EMPIEZA HOY', subtitle: 'Pruébalo gratis', mood: 'inspiring', animationStyle: 'zoom-reveal', requiredAsset: 'logo' },
       ];
     }
 
@@ -677,6 +735,8 @@ class AgentOrchestrator {
 
     return raw.slice(0, 6).map((s, i) => ({
       promptVisual: (typeof s.promptVisual === 'string' && s.promptVisual.length > 10) ? s.promptVisual : fallbackPrompt,
+      spokenDialog: (typeof s.spokenDialog === 'string' && s.spokenDialog.length > 0) ? s.spokenDialog : null,
+      voiceOver: (typeof s.voiceOver === 'string' && s.voiceOver.length > 0) ? s.voiceOver : null,
       title: (typeof s.title === 'string' && s.title.length > 1) ? s.title.toUpperCase() : `ESCENA ${i + 1}`,
       subtitle: (typeof s.subtitle === 'string') ? s.subtitle : '',
       mood: VALID_MOODS.includes(s.mood) ? s.mood : 'inspiring',

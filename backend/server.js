@@ -15,7 +15,7 @@ if (fs.existsSync(envPath)) {
 }
 
 // Diagnóstico inmediato de URL pública
-const publicUrl = (process.env.PUBLIC_BASE_URL || 'http://localhost:3001').trim();
+const publicUrl = (process.env.SERVER_URL || 'http://localhost:3001').trim();
 console.log(`\x1b[32m[Server] 🌐 URL Pública detectada: ${publicUrl}\x1b[0m\n`);
 
 const orchestrator = require('./core/AgentOrchestrator');
@@ -28,6 +28,7 @@ const publishingService = require('./services/publishingService');
 const instagramPublisher = require('./automation/instagramPublisher');
 const agroDataService = require('./services/agroDataService');
 const agroImageService = require('./services/agroImageService');
+const productContextService = require('./services/productContextService');
 
 // === INICIALIZACIÓN DE DIRECTORIOS ===
 const requiredDirs = [
@@ -51,7 +52,27 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
-app.use('/output', cors(), express.static('output')); 
+// Middleware para bypass de ngrok interstitial y Content-Type correcto en archivos de output
+app.use('/output', cors(), (req, res, next) => {
+  // Forzar Content-Type correcto basado en la extensión del archivo
+  const ext = path.extname(req.path).toLowerCase();
+  const mimeTypes = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.mp4': 'video/mp4',
+    '.mov': 'video/quicktime'
+  };
+  if (mimeTypes[ext]) {
+    res.setHeader('Content-Type', mimeTypes[ext]);
+  }
+  // Headers para bypass de ngrok interstitial
+  res.setHeader('ngrok-skip-browser-warning', 'true');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  next();
+}, express.static('output'));
 app.use('/assets', cors(), express.static('data/assets')); 
 app.use('/temp_refs', cors(), express.static('data/temp_refs')); 
 app.use('/audio', cors(), express.static('data/audio')); 
@@ -153,6 +174,32 @@ app.delete('/api/knowledge/:type/:id', (req, res) => {
 });
 
 /**
+ * Endpoints de Contexto de Producto
+ */
+app.get('/api/product-context', (req, res) => {
+  res.json(productContextService.get());
+});
+
+app.post('/api/product-context', (req, res) => {
+  const { context, metadata } = req.body;
+  const result = productContextService.saveAll(context, metadata);
+  console.log(`\x1b[32m[Server] 📝 Contexto de producto actualizado (${(context || '').length} chars).\x1b[0m`);
+  res.json({ success: true, data: result });
+});
+
+app.put('/api/product-context/context', (req, res) => {
+  const { context } = req.body;
+  const result = productContextService.saveContext(context);
+  res.json({ success: true, data: result });
+});
+
+app.put('/api/product-context/metadata', (req, res) => {
+  const metadata = req.body;
+  const result = productContextService.saveMetadata(metadata);
+  res.json({ success: true, data: result });
+});
+
+/**
  * Endpoints de Referencias Temporales
  */
 app.post('/api/temp-upload', uploadTemp.single('file'), (req, res) => {
@@ -170,6 +217,7 @@ app.post('/api/temp-upload', uploadTemp.single('file'), (req, res) => {
 app.post('/api/ai/refine-prompt', async (req, res) => {
   const { prompt } = req.body;
   const context = knowledgeService.getAllAsText();
+  const productContextSection = productContextService.getAsPromptSection();
   
   const instruction = `
     Eres un Optimizador de Prompts para un enjambre de marketing.
@@ -179,6 +227,9 @@ app.post('/api/ai/refine-prompt', async (req, res) => {
     2. Define el tono de voz basado en el contexto de marca.
     3. Añade directrices de composición visual (luces, encuadre, elementos).
     4. Asegúrate de mencionar activos de la Media Library si son relevantes.
+    5. Si hay contexto de producto, el briefing DEBE estar alineado con ese producto.
+    
+    ${productContextSection ? productContextSection : ''}
     
     MARCA: ${context}
     BORRADOR: ${prompt}
@@ -196,6 +247,7 @@ app.post('/api/ai/refine-prompt', async (req, res) => {
 app.post('/api/ai/suggest-idea', async (req, res) => {
   const { type, media, aspectRatio, engineMode } = req.body;
   const context = knowledgeService.getAllAsText();
+  const productContextSection = productContextService.getAsPromptSection();
   
   const angles = [
     "Dramático y urgente (enfocado en el dolor del usuario)",
@@ -222,6 +274,8 @@ app.post('/api/ai/suggest-idea', async (req, res) => {
     
     CONOCIMIENTO DE MARCA:
     ${context}
+    
+    ${productContextSection ? productContextSection : ''}
     
     ⚠️ RESTRICCIÓN TÉCNICA CRÍTICA DE VÍDEO ⚠️
     El generador de vídeo por IA (Google Veo) produce EXACTAMENTE 8 SEGUNDOS por clip.
@@ -483,6 +537,10 @@ app.post('/api/agro/generate-price-story', async (req, res) => {
       `${p.NombreProductoCompleto}: ${parseFloat(p.Precio).toFixed(2)} €/kg`
     ).join('\n');
 
+    const pMeta = productContextService.getMetadata();
+    const websiteLine = pMeta.website ? `\n\nMás información en ${pMeta.website}` : '';
+    const priceHashtags = pMeta.defaultHashtags || '#preciosmedios #mercado';
+
     const savedPost = postService.save({
       briefing: `Precios medios del día ${fecha}`,
       contentType: 'price-story',
@@ -490,12 +548,12 @@ app.post('/api/agro/generate-price-story', async (req, res) => {
       content: {
         text: `Precios medios del día ${fecha}\n\n${priceList}`,
         facebook: {
-          copy: `Precios medios del día ${fecha}\n\n${priceList}\n\nMás información en www.helpmeagro.com`,
-          hashtags: '#preciosmedios #hortalizas #agricultura #andalucia #helpmeagro #preciosmercado'
+          copy: `Precios medios del día ${fecha}\n\n${priceList}${websiteLine}`,
+          hashtags: priceHashtags
         },
         instagram: {
           copy: `Precios medios del día ${fecha}\n\n${priceList}`,
-          hashtags: '#preciosmedios #hortalizas #agricultura #andalucia #helpmeagro #preciosmercado #mercado #almeria'
+          hashtags: priceHashtags
         }
       },
       visuals: [imageResult.url],
@@ -558,6 +616,9 @@ app.post('/api/agro/auto-daily', async (req, res) => {
   try {
     console.log('\x1b[35m[API] Ejecutando contenido agro diario automático...\x1b[0m');
     const results = { priceStory: null, newsPost: null };
+    const autoMeta = productContextService.getMetadata();
+    const autoWebsiteLine = autoMeta.website ? `\n\nMás información en ${autoMeta.website}` : '';
+    const autoHashtags = autoMeta.defaultHashtags || '#preciosmedios #mercado';
 
     // 1. Generar historia de precios
     try {
@@ -579,12 +640,12 @@ app.post('/api/agro/auto-daily', async (req, res) => {
             content: {
               text: `Precios medios del día ${fecha}\n\n${priceList}`,
               facebook: {
-                copy: `Precios medios del día ${fecha}\n\n${priceList}\n\nMás información en www.helpmeagro.com`,
-                hashtags: '#preciosmedios #hortalizas #agricultura #andalucia #helpmeagro #preciosmercado'
+                copy: `Precios medios del día ${fecha}\n\n${priceList}${autoWebsiteLine}`,
+                hashtags: autoHashtags
               },
               instagram: {
                 copy: `Precios medios del día ${fecha}\n\n${priceList}`,
-                hashtags: '#preciosmedios #hortalizas #agricultura #andalucia #helpmeagro #preciosmercado #mercado #almeria'
+                hashtags: autoHashtags
               }
             },
             visuals: [imageResult.url],
@@ -661,6 +722,15 @@ app.post('/api/bot/email', (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/bot/formats', (req, res) => {
+  const { formats } = req.body;
+  if (!Array.isArray(formats)) {
+    return res.status(400).json({ error: 'formats debe ser un array' });
+  }
+  botStateService.setAllowedFormats(formats);
+  res.json({ success: true, allowedFormats: formats });
+});
+
 app.get('/api/bot/schedule', (req, res) => {
   res.json(botStateService.getSchedule());
 });
@@ -671,6 +741,50 @@ app.post('/api/bot/force-plan', async (req, res) => {
     res.json({ success: true, schedule: botStateService.getSchedule() });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/bot/schedule/:day', (req, res) => {
+  const day = parseInt(req.params.day);
+  const updates = req.body;
+  const schedule = botStateService.getSchedule();
+  const entry = schedule.find(e => e.day === day);
+
+  if (!entry) {
+    const newEntry = { day, status: 'planned', postId: null, ...updates };
+    botStateService.addScheduleEntry(newEntry);
+    return res.json({ success: true, entry: newEntry });
+  }
+
+  botStateService.updateScheduleDay(day, updates);
+  res.json({ success: true, entry: { ...entry, ...updates } });
+});
+
+app.delete('/api/bot/schedule/:day', (req, res) => {
+  const day = parseInt(req.params.day);
+  botStateService.removeScheduleEntry(day);
+  res.json({ success: true });
+});
+
+app.post('/api/bot/execute/:day', async (req, res) => {
+  const day = parseInt(req.params.day);
+  const schedule = botStateService.getSchedule();
+  const entry = schedule.find(e => e.day === day);
+
+  if (!entry) return res.status(404).json({ error: 'No hay entrada para ese día' });
+  if (entry.status !== 'planned') return res.status(400).json({ error: `El estado actual es '${entry.status}', debe ser 'planned'` });
+
+  res.json({ success: true, message: `Generando contenido para el día ${day} (${entry.format})...` });
+
+  // Delegar al scheduler que ya tiene la lógica de enrutamiento por tipo
+  if (entry.format === 'price-story' || entry.format === 'news-post') {
+    scheduler.executeAgroContent(day, entry).catch(e =>
+      console.error(`[Manual] Error contenido agro día ${day}:`, e.message)
+    );
+  } else {
+    scheduler.executeCreativeContent(day, entry).catch(e =>
+      console.error(`[Manual] Error contenido creativo día ${day}:`, e.message)
+    );
   }
 });
 
@@ -746,7 +860,7 @@ function renderWebhookPage(type, message) {
  * Arranque del servidor
  */
 app.listen(PORT, () => {
-  const publicUrl = (process.env.PUBLIC_BASE_URL || 'http://localhost:3001').trim();
+  const publicUrl = (process.env.SERVER_URL || 'http://localhost:3001').trim();
   console.log(`\n\x1b[32m[Server] ✅ Corriendo en http://localhost:${PORT}\x1b[0m`);
   console.log(`\x1b[32m[Server] 🌐 URL Pública detectada: ${publicUrl}\x1b[0m`);
   console.log(`\x1b[32m[Server] 🔍 Grounding activo.\x1b[0m\n`);

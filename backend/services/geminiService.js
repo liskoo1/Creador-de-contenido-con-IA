@@ -99,7 +99,13 @@ class GeminiService {
         : '';
 
       const finalPrompt = `${prompt}${ratioText}`;
-      console.log(`[GeminiService] Pintando con Google (Nano Banana 2): "${finalPrompt.substring(0, 120)}..."`);
+      console.log(`\x1b[36m[GeminiService] === IMAGE GENERATION PROMPT ===\x1b[0m`);
+      console.log(`\x1b[36m[GeminiService] Aspect Ratio: ${aspectRatio || 'default'}\x1b[0m`);
+      console.log(`\x1b[36m[GeminiService] Prompt completo:\n${finalPrompt}\x1b[0m`);
+      if (referenceImages && referenceImages.length > 0) {
+        console.log(`\x1b[36m[GeminiService] Referencias adjuntas: ${referenceImages.map(r => r.description).join(', ')}\x1b[0m`);
+      }
+      console.log(`\x1b[36m[GeminiService] === FIN PROMPT ===\x1b[0m`);
       
       const fileName = `image_${uuidv4()}.png`;
       const filePath = path.join(this.outputDir, fileName);
@@ -152,7 +158,10 @@ class GeminiService {
 
   async generateVideoClip(prompt, aspectRatio = "16:9") {
     try {
-      console.log(`[GeminiService] Generando video con Veo [${aspectRatio}]: "${prompt}"`);
+      console.log(`\x1b[35m[GeminiService] === VIDEO GENERATION PROMPT ===\x1b[0m`);
+      console.log(`\x1b[35m[GeminiService] Aspect Ratio: ${aspectRatio}\x1b[0m`);
+      console.log(`\x1b[35m[GeminiService] Prompt completo:\n${prompt}\x1b[0m`);
+      console.log(`\x1b[35m[GeminiService] === FIN PROMPT ===\x1b[0m`);
       const fileName = `video_${uuidv4()}.mp4`;
       const filePath = path.join(this.outputDir, fileName);
 

@@ -6,11 +6,59 @@
     <title>AI Content Hub | Deep Knowledge Engine</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="css/autopilot.css">
+    <link rel="stylesheet" href="css/product-context.css">
 </head>
 <body>
     <div class="app-container">
         <!-- Sidebar Lateral -->
         <aside class="sidebar">
+            <!-- PRODUCT CONTEXT EDITOR -->
+            <div class="product-context-section">
+                <div class="product-context-header" onclick="toggleProductContext()" style="cursor:pointer">
+                    <h3>▶ Product Context</h3>
+                    <span id="product-context-status" class="product-context-status empty">NO CONFIGURADO</span>
+                </div>
+                <div id="product-context-body" class="product-context-body">
+                <div class="product-meta-fields">
+                    <div class="product-meta-row">
+                        <div class="product-meta-field">
+                            <label>Producto</label>
+                            <input type="text" id="product-name" placeholder="Nombre del producto/app">
+                        </div>
+                        <div class="product-meta-field">
+                            <label>Industria</label>
+                            <input type="text" id="product-industry" placeholder="Ej: Agricultura, SaaS...">
+                        </div>
+                    </div>
+                    <div class="product-meta-row">
+                        <div class="product-meta-field">
+                            <label>Website</label>
+                            <input type="text" id="product-website" placeholder="https://...">
+                        </div>
+                    </div>
+                    <div class="product-meta-field">
+                        <label>Hashtags por defecto</label>
+                        <input type="text" id="product-hashtags" placeholder="#marca #producto #industria">
+                    </div>
+                </div>
+                <div class="product-context-editor">
+                    <div class="editor-toolbar">
+                        <button class="toolbar-btn" onclick="formatText('bold')" title="Negrita"><b>B</b></button>
+                        <button class="toolbar-btn" onclick="formatText('heading')" title="Título">H</button>
+                        <button class="toolbar-btn" onclick="formatText('list')" title="Lista">&#8226;</button>
+                        <button class="toolbar-btn" onclick="formatText('link')" title="Enlace">&#128279;</button>
+                    </div>
+                    <textarea id="product-context-textarea" class="product-context-textarea" 
+                        placeholder="Describe aquí tu producto/servicio en detalle. Todo el contenido generado se basará en este contexto.&#10;&#10;Incluye:&#10;- Qué es tu producto&#10;- Para quién es&#10;- Beneficios principales&#10;- Tono de marca&#10;- Palabras clave a usar"></textarea>
+                    <div class="product-char-count"><span id="product-char-count">0</span> caracteres</div>
+                </div>
+                <div class="product-context-actions">
+                    <button id="product-context-save-btn" class="product-context-save-btn" onclick="saveProductContext()">GUARDAR CONTEXTO</button>
+                </div>
+                <div class="product-context-hint">Este contexto se inyecta en TODOS los agentes. Es la fuente de verdad para sesgar el contenido hacia tu producto.</div>
+                </div>
+            </div>
+
             <div class="sidebar-header">
                 <h2>Knowledge Base</h2>
             </div>
@@ -178,7 +226,84 @@
                 <h2 id="calendar-title">📅 PLANNING_CALENDAR</h2>
                 <button class="close-modal" onclick="closeCalendar()">×</button>
             </div>
-            <div id="calendar-grid" class="calendar-grid">
+            <div class="calendar-config-panel">
+                <h3>⚙️ Configuración del Auto-Pilot</h3>
+                <p>Selecciona qué tipos de contenido creativos permites que la IA genere en el plan mensual:</p>
+                <div class="config-checkboxes" id="format-checkboxes">
+                    <!-- Dinámicamente llenado por app.js -->
+                </div>
+            </div>
+            <div class="calendar-layout">
+                <div id="calendar-grid" class="calendar-grid">
+                </div>
+                <!-- Panel lateral de edición -->
+                <div id="day-editor" class="day-editor hidden">
+                    <div class="day-editor-header">
+                        <h3 id="day-editor-title">Día X</h3>
+                        <button class="day-editor-close" onclick="closeDayEditor()">×</button>
+                    </div>
+                    <div class="day-editor-body">
+                        <div class="day-editor-field">
+                            <label>Hora</label>
+                            <input type="time" id="edit-hour" value="12:00">
+                        </div>
+                        <div class="day-editor-field">
+                            <label>Formato</label>
+                            <select id="edit-format">
+                                <option value="single">Single</option>
+                                <option value="carousel">Carousel</option>
+                                <option value="video">Video</option>
+                                <option value="flyer">Flyer</option>
+                                <option value="price-story">Story Precios</option>
+                                <option value="news-post">Post Noticia</option>
+                            </select>
+                        </div>
+                        <div class="day-editor-field">
+                            <label>Medio</label>
+                            <select id="edit-media">
+                                <option value="image">Imagen</option>
+                                <option value="video">Vídeo</option>
+                            </select>
+                        </div>
+                        <div class="day-editor-field">
+                            <label>Aspect Ratio</label>
+                            <select id="edit-ratio">
+                                <option value="1:1">1:1 (Cuadrado)</option>
+                                <option value="4:5">4:5 (Retrato)</option>
+                                <option value="9:16">9:16 (Vertical)</option>
+                            </select>
+                        </div>
+                        <div class="day-editor-field">
+                            <label>Concepto</label>
+                            <input type="text" id="edit-concept" placeholder="Concepto del contenido...">
+                        </div>
+                        <div class="day-editor-field">
+                            <label>Ángulo</label>
+                            <input type="text" id="edit-angle" placeholder="Ángulo creativo...">
+                        </div>
+                        <div class="day-editor-field full-width">
+                            <label>Briefing</label>
+                            <textarea id="edit-briefing" rows="5" placeholder="Briefing detallado del contenido..."></textarea>
+                        </div>
+                        <div class="day-editor-field">
+                            <label>Estado</label>
+                            <select id="edit-status">
+                                <option value="planned">⏳ Planificado</option>
+                                <option value="generating">⚙️ Generando</option>
+                                <option value="pending_approval">📧 Pendiente aprobación</option>
+                                <option value="approved">✅ Aprobado</option>
+                                <option value="published">🟢 Publicado</option>
+                                <option value="rejected">❌ Rechazado</option>
+                            </select>
+                        </div>
+                        <div class="day-editor-status-info" id="edit-status-info"></div>
+                    </div>
+                    <div class="day-editor-footer">
+                        <button class="day-editor-btn generate-btn" id="generate-btn" onclick="executeDayEntry()">🚀 GENERAR</button>
+                        <button class="day-editor-btn save-btn" onclick="saveDayEntry()">💾 GUARDAR</button>
+                        <button class="day-editor-btn delete-btn" onclick="deleteDayEntry()">🗑️</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

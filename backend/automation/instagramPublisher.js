@@ -54,7 +54,7 @@ class InstagramPublisher {
     }
 
     if (imageUrl.includes('localhost')) {
-      throw new Error('Meta no puede acceder a URLs de "localhost". Configura PUBLIC_BASE_URL en el archivo .env con una URL pública (ej: ngrok).');
+      throw new Error('Meta no puede acceder a URLs de "localhost". Configura SERVER_URL en el archivo .env con una URL pública (ej: ngrok).');
     }
 
     console.log(`[Instagram] Intentando publicar. ID Cuenta: "${accountId}", Token (recortado): "${accessToken.substring(0, 10)}..."`);
@@ -128,7 +128,7 @@ class InstagramPublisher {
     }
 
     if (videoUrl.includes('localhost')) {
-      throw new Error('Meta no puede acceder a URLs de "localhost". Configura PUBLIC_BASE_URL en el archivo .env con una URL pública (ej: ngrok).');
+      throw new Error('Meta no puede acceder a URLs de "localhost". Configura SERVER_URL en el archivo .env con una URL pública (ej: ngrok).');
     }
 
     console.log(`[Instagram] Intentando publicar REEL. ID Cuenta: "${accountId}", Video URL: "${videoUrl}"`);
@@ -213,7 +213,7 @@ class InstagramPublisher {
     }
 
     if (mediaUrl.includes('localhost')) {
-      throw new Error('Meta no puede acceder a URLs de "localhost". Configura PUBLIC_BASE_URL en el archivo .env con una URL pública (ej: ngrok).');
+      throw new Error('Meta no puede acceder a URLs de "localhost". Configura SERVER_URL en el archivo .env con una URL pública (ej: ngrok).');
     }
 
     console.log(`[Instagram] Intentando publicar STORY (${mediaType}). URL: "${mediaUrl}"`);
@@ -291,7 +291,7 @@ class InstagramPublisher {
     }
 
     if (imageUrls.some(url => url.includes('localhost'))) {
-      throw new Error('Meta no puede acceder a URLs de "localhost". Configura PUBLIC_BASE_URL en el archivo .env con una URL pública (ej: ngrok).');
+      throw new Error('Meta no puede acceder a URLs de "localhost". Configura SERVER_URL en el archivo .env con una URL pública (ej: ngrok).');
     }
 
     try {
@@ -299,36 +299,97 @@ class InstagramPublisher {
       const baseUrl = isIgToken ? 'https://graph.instagram.com' : 'https://graph.facebook.com';
       const targetId = isIgToken ? 'me' : accountId;
 
-      // Crear contenedores individuales para cada imagen
+      // Paso 1: Crear contenedores individuales para cada imagen
       const childIds = [];
-      for (const url of imageUrls) {
+      for (let i = 0; i < imageUrls.length; i++) {
+        const url = imageUrls[i];
+        console.log(`[Instagram] Creando contenedor hijo ${i + 1}/${imageUrls.length}: ${url}`);
+        const params = new URLSearchParams();
+        params.append('image_url', url);
+        params.append('is_carousel_item', 'true');
+        params.append('media_type', 'IMAGE');
+        params.append('access_token', accessToken);
         const res = await fetch(`${baseUrl}/v25.0/${targetId}/media`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image_url: url,
-            is_carousel_item: true,
-            access_token: accessToken
-          })
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString()
         });
         const data = await res.json();
-        if (data.id) childIds.push(data.id);
+        if (data.error) {
+          console.error(`[Instagram] Error creando contenedor hijo ${i + 1}: ${data.error.message}`);
+          throw new Error(`Error en imagen ${i + 1} del carrusel: ${data.error.message}`);
+        }
+        if (!data.id) {
+          throw new Error(`Meta no devolvió ID para la imagen ${i + 1} del carrusel.`);
+        }
+        childIds.push(data.id);
+        console.log(`[Instagram] Contenedor hijo ${i + 1} creado: ${data.id}`);
       }
 
-      // Crear el contenedor del carrusel
+      // Paso 2: Esperar a que TODOS los contenedores hijos estén listos
+      console.log(`[Instagram] Esperando a que ${childIds.length} contenedores hijos se procesen...`);
+      for (let i = 0; i < childIds.length; i++) {
+        let isReady = false;
+        let attempts = 0;
+        const maxAttempts = 15; // ~45 segundos máximo por imagen
+        while (!isReady && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          attempts++;
+          const checkRes = await fetch(`${baseUrl}/v25.0/${childIds[i]}?fields=status_code&access_token=${accessToken}`);
+          const checkData = await checkRes.json();
+          if (checkData.status_code === 'FINISHED') {
+            isReady = true;
+            console.log(`[Instagram] ✅ Contenedor hijo ${i + 1}/${childIds.length} listo.`);
+          } else if (checkData.status_code === 'ERROR') {
+            throw new Error(`Meta no pudo procesar la imagen ${i + 1} del carrusel.`);
+          }
+        }
+        if (!isReady) {
+          throw new Error(`Timeout esperando a que Meta procese la imagen ${i + 1} del carrusel.`);
+        }
+      }
+
+      // Paso 3: Crear el contenedor del carrusel
+      console.log(`[Instagram] Creando contenedor de carrusel con ${childIds.length} hijos: ${childIds.join(', ')}`);
+      const carouselParams = new URLSearchParams();
+      carouselParams.append('media_type', 'CAROUSEL');
+      carouselParams.append('children', childIds.join(','));
+      carouselParams.append('caption', caption);
+      carouselParams.append('access_token', accessToken);
       const carouselRes = await fetch(`${baseUrl}/v25.0/${targetId}/media`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          media_type: 'CAROUSEL',
-          children: childIds,
-          caption: caption,
-          access_token: accessToken
-        })
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: carouselParams.toString()
       });
       const carouselData = await carouselRes.json();
 
-      // Publicar el carrusel
+      if (carouselData.error) {
+        throw new Error(`Error creando contenedor de carrusel: ${carouselData.error.message}`);
+      }
+      if (!carouselData.id) {
+        throw new Error('Meta no devolvió ID para el contenedor de carrusel.');
+      }
+      console.log(`[Instagram] Contenedor de carrusel creado: ${carouselData.id}`);
+
+      // Paso 3.5: Esperar a que el contenedor de carrusel esté listo
+      let carouselReady = false;
+      let carouselAttempts = 0;
+      while (!carouselReady && carouselAttempts < 15) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        carouselAttempts++;
+        const checkRes = await fetch(`${baseUrl}/v25.0/${carouselData.id}?fields=status_code&access_token=${accessToken}`);
+        const checkData = await checkRes.json();
+        if (checkData.status_code === 'FINISHED') {
+          carouselReady = true;
+        } else if (checkData.status_code === 'ERROR') {
+          throw new Error('Meta no pudo procesar el contenedor de carrusel.');
+        }
+      }
+      if (!carouselReady) {
+        throw new Error('Timeout esperando a que Meta procese el contenedor de carrusel.');
+      }
+
+      // Paso 4: Publicar el carrusel
       const publishData = await this._publishContainerWithRetry(baseUrl, targetId, carouselData.id, accessToken);
 
       console.log(`\x1b[32m[Instagram] ✅ CARRUSEL publicado exitosamente. ID: ${publishData.id}\x1b[0m`);

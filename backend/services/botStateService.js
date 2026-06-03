@@ -19,6 +19,13 @@ class BotStateService {
       this._write({
         isAutoPilotActive: false,
         adminEmail: '',
+        allowedFormats: [
+          { format: "single", mediaType: "image" },
+          { format: "carousel", mediaType: "image" },
+          { format: "carousel", mediaType: "video" },
+          { format: "video", mediaType: "image" },
+          { format: "video", mediaType: "video" }
+        ],
         currentMonth: null,
         schedule: [],
         pendingApproval: []
@@ -61,6 +68,24 @@ class BotStateService {
     this._write(state);
   }
 
+  getAllowedFormats() {
+    const state = this._read();
+    return state.allowedFormats || [
+      { format: "single", mediaType: "image" },
+      { format: "carousel", mediaType: "image" },
+      { format: "carousel", mediaType: "video" },
+      { format: "video", mediaType: "image" },
+      { format: "video", mediaType: "video" }
+    ];
+  }
+
+  setAllowedFormats(formats) {
+    const state = this._read();
+    state.allowedFormats = formats;
+    this._write(state);
+    console.log(`[BotState] Format configuration updated (${formats.length} combinations allowed).`);
+  }
+
   /**
    * Guarda el calendario mensual generado por el Agente Planificador.
    * @param {string} month - Formato "YYYY-MM"
@@ -90,6 +115,20 @@ class BotStateService {
       Object.assign(entry, updates);
       this._write(state);
     }
+  }
+
+  addScheduleEntry(entry) {
+    const state = this._read();
+    state.schedule.push(entry);
+    this._write(state);
+    console.log(`[BotState] Nueva entrada añadida para el día ${entry.day}.`);
+  }
+
+  removeScheduleEntry(day) {
+    const state = this._read();
+    state.schedule = state.schedule.filter(e => e.day !== day);
+    this._write(state);
+    console.log(`[BotState] Entrada del día ${day} eliminada.`);
   }
 
   addPendingApproval(postData) {

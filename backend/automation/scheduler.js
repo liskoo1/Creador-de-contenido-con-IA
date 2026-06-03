@@ -10,6 +10,7 @@ const agroDataService = require('../services/agroDataService');
 const agroImageService = require('../services/agroImageService');
 const publishingService = require('../services/publishingService');
 const instagramPublisher = require('./instagramPublisher');
+const productContextService = require('../services/productContextService');
 
 /**
  * Motor de Automatización del Auto-Pilot.
@@ -58,12 +59,13 @@ class Scheduler {
 
     console.log(`[Scheduler] Temporizadores activos (Mensual: día 1, Diario: cada hora, Agro: ${cronHour}).`);
 
-    // Al arrancar, comprobamos si ya estamos en un mes sin planificación
+    // Al arrancar, comprobamos el estado inicial
     this.checkInitialState();
   }
 
   /**
-   * Comprueba si al arrancar el servidor falta la planificación del mes actual.
+   * Comprueba si al arrancar el servidor falta la planificación del mes actual
+   * o si hay contenido pendiente de ejecutar hoy.
    */
   async checkInitialState() {
     const state = botStateService.getState();
@@ -72,6 +74,12 @@ class Scheduler {
     if (state.isAutoPilotActive && state.currentMonth !== currentMonth) {
       console.log('[Scheduler] Detectado mes sin planificación al arrancar. Generando...');
       await this.runMonthlyPlanning();
+    }
+
+    // Ejecutar checkAndExecute al arrancar para no perder la ventana del día actual
+    if (state.isAutoPilotActive) {
+      console.log('[Scheduler] Comprobando contenido pendiente de hoy al arrancar...');
+      await this.checkAndExecute();
     }
   }
 
@@ -87,10 +95,15 @@ class Scheduler {
     try {
       const skillPrompt = await skillLoader.loadSkill('social-media-planner');
       const brandContext = knowledgeService.getAllAsText();
+      const productContextSection = productContextService.getAsPromptSection();
+      const productMeta = productContextService.getMetadata();
       const now = new Date();
       const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
       const monthLabel = `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
       const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+      const allowedFormats = botStateService.getAllowedFormats();
+      const formatRules = allowedFormats.map(f => `- format: '${f.format}', mediaType: '${f.mediaType}'`).join('\n        ');
 
       const prompt = `
         ${skillPrompt}
@@ -98,8 +111,16 @@ class Scheduler {
         CONTEXTO DE MARCA:
         ${brandContext}
 
+        ${productContextSection ? productContextSection : ''}
+
         MES A PLANIFICAR: ${monthLabel} (${daysInMonth} días)
         Hoy es día ${now.getDate()}. Si ya han pasado días del mes, planifica solo los días restantes.
+
+        REGLA CRÍTICA DE FORMATOS Y MEDIOS:
+        Solo puedes generar el plan usando UNA de estas combinaciones exactas permitidas por el usuario:
+        ${formatRules}
+        
+        El JSON que devuelvas DEBE incluir el campo 'mediaType' correspondiente junto a 'format' en cada entrada del calendario.
 
         Genera el calendario ahora.
       `;
@@ -113,16 +134,70 @@ class Scheduler {
         throw new Error('El Planificador no devolvió un array válido.');
       }
 
-      // Añadimos estado por defecto a cada entrada
+      // Añadimos estado por defecto a cada entrada creativa
       const enrichedSchedule = schedule.map(entry => ({
         ...entry,
-        status: 'planned', // planned | generating | pending_approval | approved | published | rejected
+        mediaType: entry.mediaType || (entry.format === 'video' ? 'video' : 'image'),
+        status: 'planned',
         postId: null
       }));
 
+      // Inyectar entradas fijas: price-story todos los días (menos domingos), news-post todos los días
+      const startDay = now.getDate();
+      const schedMeta = productContextService.getMetadata();
+      const productNameLabel = schedMeta.productName || 'nuestro producto';
+      const priceBriefing = `Genera la story de precios del día para ${productNameLabel}.`;
+      const newsBriefing = `Genera el post con la noticia más importante del día relacionada con ${schedMeta.industry || 'el sector'}.`;
+
+      for (let d = startDay; d <= daysInMonth; d++) {
+        const dateObj = new Date(now.getFullYear(), now.getMonth(), d);
+        const dayOfWeek = dateObj.getDay(); // 0=dom, 1=lun...6=sab
+
+        // Price-story diario (menos domingo)
+        if (dayOfWeek !== 0) {
+          const hasPrice = enrichedSchedule.find(e => e.day === d && e.format === 'price-story');
+          if (!hasPrice) {
+            enrichedSchedule.push({
+              day: d,
+              hour: '08:30',
+              format: 'price-story',
+              aspectRatio: '9:16',
+              concept: `Story con precios del día`,
+              angle: 'informativo',
+              briefing: priceBriefing,
+              status: 'planned',
+              postId: null
+            });
+          }
+        }
+
+        // News-post todos los días
+        const hasCreative = enrichedSchedule.find(e => e.day === d && e.format !== 'price-story' && e.format !== 'news-post');
+        const hasNews = enrichedSchedule.find(e => e.day === d && e.format === 'news-post');
+
+        if (!hasNews) {
+          // Si ya hay contenido creativo ese día, poner la noticia a otra hora
+          const newsHour = hasCreative ? '10:00' : '12:30';
+          enrichedSchedule.push({
+            day: d,
+            hour: newsHour,
+            format: 'news-post',
+            aspectRatio: '1:1',
+            concept: `Noticia relevante del día`,
+            angle: 'noticia',
+            briefing: newsBriefing,
+            status: 'planned',
+            postId: null
+          });
+        }
+      }
+
+      // Ordenar por día y hora
+      enrichedSchedule.sort((a, b) => a.day - b.day || a.hour.localeCompare(b.hour));
+
       const currentMonth = now.toISOString().slice(0, 7);
       botStateService.setMonthlySchedule(currentMonth, enrichedSchedule);
-      console.log(`\x1b[32m[Scheduler] ✅ Calendario de ${monthLabel} generado con ${enrichedSchedule.length} publicaciones.\x1b[0m`);
+      console.log(`\x1b[32m[Scheduler] ✅ Calendario de ${monthLabel} generado con ${enrichedSchedule.length} entradas (creativas + precios + noticias).\x1b[0m`);
 
     } catch (error) {
       console.error('[Scheduler] Error en la planificación mensual:', error.message);
@@ -131,61 +206,173 @@ class Scheduler {
 
   /**
    * Comprueba cada hora si hay un post programado para ejecutar.
+   * Genera el contenido 2 horas antes de la hora programada para dar tiempo
+   * a la revisión y aprobación.
    */
   async checkAndExecute() {
-    if (!botStateService.isActive()) return;
+    if (!botStateService.isActive()) {
+      console.log('[Scheduler] checkAndExecute: Auto-Pilot desactivado, saltando.');
+      return;
+    }
 
     const now = new Date();
     const currentDay = now.getDate();
-    const currentHour = `${String(now.getHours()).padStart(2, '0')}:00`;
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
     const schedule = botStateService.getSchedule();
     const todayEntry = schedule.find(e => e.day === currentDay && e.status === 'planned');
 
-    if (!todayEntry) return;
+    if (!todayEntry) {
+      console.log(`[Scheduler] checkAndExecute: No hay entrada 'planned' para hoy (día ${currentDay}).`);
+      return;
+    }
 
-    // Comprobamos si la hora actual es >= a la programada para dar margen de anticipación
-    const scheduledHour = parseInt(todayEntry.hour.split(':')[0]);
-    const prepHour = scheduledHour - 2;
+    // Convertir la hora programada a minutos para comparación precisa
+    const [schedHour, schedMin] = todayEntry.hour.split(':').map(Number);
+    const scheduledMinutes = schedHour * 60 + (schedMin || 0);
 
-    if (now.getHours() < prepHour) return;
-    if (todayEntry.status !== 'planned') return;
+    // Ventana de ejecución: desde 2 horas antes hasta 30 min después de la hora programada
+    const prepWindowStart = scheduledMinutes - 120;
+    const prepWindowEnd = scheduledMinutes + 30;
 
-    console.log(`\x1b[33m[Scheduler] 🚀 Hora de generar contenido para el día ${currentDay} (planificado a las ${todayEntry.hour})\x1b[0m`);
+    console.log(`[Scheduler] checkAndExecute: Día=${currentDay}, Hora actual=${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} (${currentMinutes}min), Programado=${todayEntry.hour} (${scheduledMinutes}min), Ventana=[${prepWindowStart}-${prepWindowEnd}]`);
+
+    if (currentMinutes < prepWindowStart || currentMinutes > prepWindowEnd) {
+      console.log(`[Scheduler] checkAndExecute: Fuera de la ventana de ejecución.`);
+      return;
+    }
+
+    console.log(`\x1b[33m[Scheduler] 🚀 Hora de generar contenido para el día ${currentDay} (planificado a las ${todayEntry.hour}, ahora ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')})\x1b[0m`);
     
-    botStateService.updateScheduleDay(currentDay, { status: 'generating' });
+    // Enrutar según tipo de contenido
+    if (todayEntry.format === 'price-story' || todayEntry.format === 'news-post') {
+      await this.executeAgroContent(currentDay, todayEntry);
+    } else {
+      await this.executeCreativeContent(currentDay, todayEntry);
+    }
+  }
+
+  /**
+   * Ejecuta contenido creativo (single, carousel, video) usando el orquestador.
+   */
+  async executeCreativeContent(day, entry) {
+    botStateService.updateScheduleDay(day, { status: 'generating' });
 
     try {
       const brandContext = knowledgeService.getAllAsText();
-      const mediaType = todayEntry.format === 'video' ? 'video' : 'image';
+      const mediaType = entry.mediaType || (entry.format === 'video' ? 'video' : 'image');
       const result = await orchestrator.runFullWorkflow(
-        todayEntry.briefing,
+        entry.briefing,
         brandContext,
-        todayEntry.format,
+        entry.format,
         mediaType,
-        todayEntry.aspectRatio
+        entry.aspectRatio
       );
 
       const savedPost = postService.save({
-        briefing: todayEntry.briefing,
-        contentType: todayEntry.format,
-        aspectRatio: todayEntry.aspectRatio,
+        briefing: entry.briefing,
+        contentType: entry.format,
+        aspectRatio: entry.aspectRatio,
         content: result.content,
         visuals: result.visuals,
         video: result.video,
-        scheduledHour: todayEntry.hour,
+        scheduledHour: entry.hour,
         autoGenerated: true
       });
 
-      botStateService.updateScheduleDay(currentDay, { status: 'pending_approval', postId: savedPost.id });
-
-      // Enviar email de aprobación
-      await approvalGateway.sendApprovalEmail(savedPost, todayEntry);
-      console.log(`\x1b[32m[Scheduler] ✅ Contenido generado y enviado para aprobación.\x1b[0m`);
+      botStateService.updateScheduleDay(day, { status: 'pending_approval', postId: savedPost.id });
+      await approvalGateway.sendApprovalEmail(savedPost, entry);
+      console.log(`\x1b[32m[Scheduler] ✅ Contenido creativo día ${day} generado y enviado para aprobación.\x1b[0m`);
 
     } catch (error) {
-      console.error(`[Scheduler] Error generando contenido del día ${currentDay}:`, error.message);
-      botStateService.updateScheduleDay(currentDay, { status: 'planned' });
+      console.error(`[Scheduler] Error generando contenido día ${day}:`, error.message);
+      botStateService.updateScheduleDay(day, { status: 'planned' });
+    }
+  }
+
+  /**
+   * Ejecuta contenido agro (price-story o news-post) usando los servicios agro.
+   */
+  async executeAgroContent(day, entry) {
+    botStateService.updateScheduleDay(day, { status: 'generating' });
+
+    try {
+      const exeMeta = productContextService.getMetadata();
+      const exeWebsite = exeMeta.website ? `\n\nMás información en ${exeMeta.website}` : '';
+      const exeHashtags = exeMeta.defaultHashtags || '#preciosmedios #mercado';
+
+      if (entry.format === 'price-story') {
+        const prices = await agroDataService.getLatestPrices();
+        if (prices.length > 0) {
+          const imageResult = await agroImageService.generatePriceCardImage(prices);
+          if (imageResult) {
+            const fecha = new Date(prices[0].Fecha).toLocaleDateString('es-ES', {
+              day: 'numeric', month: 'long', year: 'numeric'
+            });
+            const priceList = prices.map(p =>
+              `${p.NombreProductoCompleto}: ${parseFloat(p.Precio).toFixed(2)} €/kg`
+            ).join('\n');
+
+            const savedPost = postService.save({
+              briefing: `[Auto-Agro] Precios medios del día ${fecha}`,
+              contentType: 'price-story',
+              aspectRatio: '9:16',
+              content: {
+                text: `Precios medios del día ${fecha}\n\n${priceList}`,
+                facebook: {
+                  copy: `Precios medios del día ${fecha}\n\n${priceList}${exeWebsite}`,
+                  hashtags: exeHashtags
+                },
+                instagram: {
+                  copy: `Precios medios del día ${fecha}\n\n${priceList}`,
+                  hashtags: exeHashtags
+                }
+              },
+              visuals: [imageResult.url],
+              video: null,
+              autoGenerated: true,
+              agroData: { type: 'price-story', prices, date: prices[0].Fecha }
+            });
+
+            botStateService.updateScheduleDay(day, { status: 'pending_approval', postId: savedPost.id });
+            await approvalGateway.sendApprovalEmail(savedPost, entry);
+            console.log(`\x1b[32m[Scheduler] ✅ Story de precios día ${day} generada. Post: ${savedPost.id}\x1b[0m`);
+          }
+        }
+      } else if (entry.format === 'news-post') {
+        const noticias = await agroDataService.getLatestNews();
+        if (noticias.length > 0) {
+          const newsItem = await agroDataService.selectMostImportantNews(noticias);
+          const newsUrl = agroDataService.getNewsUrl(newsItem);
+          const imageResult = await agroImageService.generateNewsPostImage(newsItem);
+          if (imageResult) {
+            const copy = await agroImageService.generateNewsCopy(newsItem, newsUrl);
+            const savedPost = postService.save({
+              briefing: `[Auto-Agro] Noticia: ${newsItem.Titulo}`,
+              contentType: 'news-post',
+              aspectRatio: '1:1',
+              content: copy,
+              visuals: [imageResult.url],
+              video: null,
+              autoGenerated: true,
+              agroData: {
+                type: 'news-post',
+                newsId: newsItem.Id,
+                newsTitle: newsItem.Titulo,
+                newsUrl,
+                newsImageOriginal: agroDataService.getNewsImageUrl(newsItem)
+              }
+            });
+
+            botStateService.updateScheduleDay(day, { status: 'pending_approval', postId: savedPost.id });
+            await approvalGateway.sendApprovalEmail(savedPost, entry);
+            console.log(`\x1b[32m[Scheduler] ✅ Post de noticia día ${day} generado. Post: ${savedPost.id}\x1b[0m`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[Scheduler] Error generando contenido agro día ${day}:`, error.message);
+      botStateService.updateScheduleDay(day, { status: 'planned' });
     }
   }
 
@@ -194,6 +381,9 @@ class Scheduler {
    */
   async runAgroDaily() {
     console.log('\x1b[35m[Scheduler] CRON AGRO DIARIO — Generando contenido de precios y noticias...\x1b[0m');
+    const meta = productContextService.getMetadata();
+    const website = meta.website || '';
+    const defaultHashtags = meta.defaultHashtags || '';
 
     // 1. Historia de precios
     try {
@@ -207,6 +397,9 @@ class Scheduler {
           const priceList = prices.map(p =>
             `${p.NombreProductoCompleto}: ${parseFloat(p.Precio).toFixed(2)} €/kg`
           ).join('\n');
+          
+          const websiteLine = website ? `\n\nMás información en ${website}` : '';
+          const priceHashtags = defaultHashtags || '#preciosmedios #mercado';
 
           const savedPost = postService.save({
             briefing: `[Auto-Agro] Precios medios del día ${fecha}`,
@@ -215,12 +408,12 @@ class Scheduler {
             content: {
               text: `Precios medios del día ${fecha}\n\n${priceList}`,
               facebook: {
-                copy: `Precios medios del día ${fecha}\n\n${priceList}\n\nMás información en www.helpmeagro.com`,
-                hashtags: '#preciosmedios #hortalizas #agricultura #andalucia #helpmeagro #preciosmercado'
+                copy: `Precios medios del día ${fecha}\n\n${priceList}${websiteLine}`,
+                hashtags: priceHashtags
               },
               instagram: {
                 copy: `Precios medios del día ${fecha}\n\n${priceList}`,
-                hashtags: '#preciosmedios #hortalizas #agricultura #andalucia #helpmeagro #preciosmercado #mercado #almeria'
+                hashtags: priceHashtags
               }
             },
             visuals: [imageResult.url],
@@ -266,7 +459,8 @@ class Scheduler {
           });
 
           // Publicar en Instagram via Puente
-          const caption = `${copy.instagram?.copy || newsItem.Titulo}\n\n${copy.instagram?.hashtags || '#agricultura #helpmeagro'}`;
+          const newsHashtags = copy.instagram?.hashtags || defaultHashtags || '#noticia';
+          const caption = `${copy.instagram?.copy || newsItem.Titulo}\n\n${newsHashtags}`;
           console.log(`[Scheduler] Publicando POST de noticia: ${imageResult.url}`);
           await publishingService.publishViaBridge(imageResult.url, 'image', caption);
           console.log(`\x1b[32m[Scheduler] Post de noticia publicado. Post ID: ${savedPost.id}\x1b[0m`);

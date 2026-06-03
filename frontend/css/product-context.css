@@ -1,0 +1,224 @@
+/* ============================================
+   PRODUCT CONTEXT EDITOR
+   ============================================ */
+
+.product-context-section {
+  border: 1px solid rgba(0, 243, 255, 0.15);
+  border-radius: 12px;
+  background: rgba(0, 243, 255, 0.03);
+  padding: 16px;
+  margin-bottom: 8px;
+}
+
+.product-context-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+  user-select: none;
+  transition: margin-bottom 0.3s;
+}
+
+.product-context-header.open {
+  margin-bottom: 12px;
+}
+
+.product-context-header h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--accent);
+  margin: 0;
+  transition: color 0.2s;
+}
+
+.product-context-header:hover h3 {
+  color: #fff;
+}
+
+.product-context-body {
+  display: none;
+  flex-direction: column;
+  gap: 0;
+}
+
+.product-context-body.open {
+  display: flex;
+}
+
+.product-context-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.product-context-status.active {
+  color: #00e676;
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid rgba(0, 230, 118, 0.3);
+}
+
+.product-context-status.empty {
+  color: #ff9100;
+  background: rgba(255, 145, 0, 0.1);
+  border: 1px solid rgba(255, 145, 0, 0.3);
+}
+
+.product-meta-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.product-meta-row {
+  display: flex;
+  gap: 8px;
+}
+
+.product-meta-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.product-meta-field label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  color: var(--accent);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.product-meta-field input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: #e0e0e0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.3s;
+  width: 100%;
+}
+
+.product-meta-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 243, 255, 0.15);
+}
+
+.product-context-editor {
+  position: relative;
+}
+
+.product-context-editor .editor-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+}
+
+.product-context-editor .toolbar-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', monospace;
+  transition: all 0.2s;
+}
+
+.product-context-editor .toolbar-btn:hover {
+  background: rgba(0, 243, 255, 0.1);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.product-context-editor .toolbar-btn.active {
+  background: rgba(0, 243, 255, 0.15);
+  color: var(--accent);
+}
+
+.product-context-textarea {
+  width: 100%;
+  min-height: 150px;
+  max-height: 300px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
+  color: #e0e0e0;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  padding: 12px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.product-context-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(0, 243, 255, 0.1);
+}
+
+.product-context-textarea::placeholder {
+  color: #444;
+  font-style: italic;
+}
+
+.product-context-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.product-context-save-btn {
+  flex: 1;
+  background: rgba(0, 243, 255, 0.1);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  letter-spacing: 1.5px;
+  transition: all 0.3s;
+}
+
+.product-context-save-btn:hover {
+  background: rgba(0, 243, 255, 0.2);
+  box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
+}
+
+.product-context-save-btn.saving {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.product-context-hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  margin-top: 8px;
+  line-height: 1.5;
+  opacity: 0.7;
+}
+
+.product-char-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  text-align: right;
+  margin-top: 4px;
+}

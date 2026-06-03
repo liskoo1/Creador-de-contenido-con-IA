@@ -123,8 +123,57 @@
    ============================================ */
 
 .calendar-content {
-  max-width: 900px;
+  max-width: 1200px;
   width: 95%;
+}
+
+.calendar-config-panel {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border);
+  padding: 15px 20px;
+}
+
+.calendar-config-panel h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin: 0 0 5px 0;
+}
+
+.calendar-config-panel p {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin: 0 0 15px 0;
+}
+
+.config-checkboxes {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.config-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: #e0e0e0;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+}
+
+.config-checkbox-label:hover {
+  border-color: var(--accent);
+  background: rgba(0, 212, 255, 0.05);
+}
+
+.config-checkbox-label input[type="checkbox"] {
+  accent-color: var(--accent);
 }
 
 .calendar-grid {
@@ -148,10 +197,23 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px;
-  min-height: 85px;
+  min-height: 110px;
+  max-height: 130px;
+  overflow-y: auto;
   transition: all 0.3s;
   cursor: default;
   position: relative;
+}
+
+.calendar-day::-webkit-scrollbar {
+  width: 4px;
+}
+.calendar-day::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+.calendar-day::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.3);
+  border-radius: 4px;
 }
 
 .calendar-day:hover {
@@ -194,6 +256,8 @@
 .calendar-tag-carousel { background: rgba(224, 64, 251, 0.15); color: #e040fb; }
 .calendar-tag-video { background: rgba(255, 23, 68, 0.15); color: #ff1744; }
 .calendar-tag-flyer { background: rgba(255, 145, 0, 0.15); color: #ff9100; }
+.calendar-tag-price-story { background: rgba(0, 230, 118, 0.15); color: #00e676; }
+.calendar-tag-news-post { background: rgba(255, 235, 59, 0.15); color: #ffeb3b; }
 
 .calendar-post-concept {
   font-size: 0.55rem;
@@ -233,6 +297,219 @@
 @keyframes calendarPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+
+/* Día seleccionado en el calendario */
+.calendar-day-selected {
+  border-color: #e040fb !important;
+  box-shadow: 0 0 15px rgba(224, 64, 251, 0.4) !important;
+  background: rgba(224, 64, 251, 0.08) !important;
+}
+
+/* ============================================
+   CALENDAR LAYOUT + DAY EDITOR PANEL
+   ============================================ */
+
+.calendar-layout {
+  display: flex;
+  gap: 20px;
+  max-height: 70vh;
+  overflow: hidden;
+}
+
+.calendar-layout .calendar-grid {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.day-editor {
+  width: 320px;
+  min-width: 320px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.day-editor.hidden {
+  display: none;
+}
+
+.day-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 212, 255, 0.05);
+}
+
+.day-editor-header h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--accent);
+  letter-spacing: 1px;
+  margin: 0;
+}
+
+.day-editor-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.day-editor-close:hover {
+  color: #ff1744;
+  background: rgba(255, 23, 68, 0.1);
+}
+
+.day-editor-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.day-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.day-editor-field.full-width {
+  width: 100%;
+}
+
+.day-editor-field label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--accent);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.day-editor-field input[type="text"],
+.day-editor-field input[type="time"],
+.day-editor-field select,
+.day-editor-field textarea {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: #e0e0e0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  padding: 8px 12px;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.3s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.day-editor-field input:focus,
+.day-editor-field select:focus,
+.day-editor-field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.15);
+}
+
+.day-editor-field textarea {
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.5;
+}
+
+.day-editor-field select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2300d4ff' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+}
+
+.day-editor-status-info {
+  width: 100%;
+  padding: 8px 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+}
+
+.status-linked {
+  color: var(--accent);
+}
+
+.status-unlinked {
+  color: #556;
+}
+
+.day-editor-footer {
+  display: flex;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.day-editor-btn {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.day-editor-btn.save-btn {
+  background: rgba(0, 212, 255, 0.1);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.day-editor-btn.save-btn:hover {
+  background: rgba(0, 212, 255, 0.2);
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+}
+
+.day-editor-btn.generate-btn {
+  background: rgba(0, 230, 118, 0.1);
+  color: #00e676;
+  border-color: #00e676;
+  flex: 2;
+}
+
+.day-editor-btn.generate-btn:hover {
+  background: rgba(0, 230, 118, 0.2);
+  box-shadow: 0 0 15px rgba(0, 230, 118, 0.3);
+}
+
+.day-editor-btn.generate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.day-editor-btn.delete-btn {
+  background: rgba(255, 23, 68, 0.08);
+  color: #ff1744;
+  border-color: rgba(255, 23, 68, 0.3);
+}
+
+.day-editor-btn.delete-btn:hover {
+  background: rgba(255, 23, 68, 0.15);
+  box-shadow: 0 0 15px rgba(255, 23, 68, 0.3);
 }
 
 /* ============================================

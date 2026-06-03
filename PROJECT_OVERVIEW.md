@@ -32,6 +32,6 @@ El **IA Content Hub** es un ecosistema inteligente diseñado para automatizar la
 ## Arquitectura Técnica
 - **Backend:** Node.js + Express.
 - **Frontend:** React (Vite) para la interfaz de administración.
-- **IA:** Google Gemini (1.5 Pro/Flash), OpenAI (GPT/DALL-E), Google Veo.
+- **IA:** Google Gemini (3.1 Pro/Flash), OpenAI (GPT/DALL-E), Google Veo.
 - **Base de Datos:** MySQL (Datos externos) y JSON/NoSQL local (Estado del bot y posts).
 - **Video:** Remotion.
