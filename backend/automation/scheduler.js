@@ -153,13 +153,17 @@ class Scheduler {
         const dateObj = new Date(now.getFullYear(), now.getMonth(), d);
         const dayOfWeek = dateObj.getDay(); // 0=dom, 1=lun...6=sab
 
-        // Price-story diario (menos domingo)
+        // Price-story diario (menos domingo) — hora desde AGRO_DAILY_CRON_HOUR
         if (dayOfWeek !== 0) {
+          const agroCronHour = process.env.AGRO_DAILY_CRON_HOUR || '08:00';
+          // Añadir 30 min al cron para que la planificación sea después del cron de ejecución
+          const [aH, aM] = agroCronHour.split(':').map(Number);
+          const priceHour = `${String(aH).padStart(2, '0')}:${String((aM || 0) + 30).padStart(2, '0')}`;
           const hasPrice = enrichedSchedule.find(e => e.day === d && e.format === 'price-story');
           if (!hasPrice) {
             enrichedSchedule.push({
               day: d,
-              hour: '08:30',
+              hour: priceHour,
               format: 'price-story',
               aspectRatio: '9:16',
               concept: `Story con precios del día`,

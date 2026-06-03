@@ -346,7 +346,8 @@ async function renderCalendar() {
             cell.classList.add('calendar-has-post');
             
             entries.forEach((entry, idx) => {
-                const tagClass = `calendar-tag-${entry.format}`;
+                const displayFormat = (entry.format === 'video' && entry.mediaType === 'image') ? 'video-imagen' : entry.format;
+                const tagClass = `calendar-tag-${displayFormat}`;
                 const statusClass = `calendar-status-${entry.status}`;
                 const statusLabels = {
                     planned: '⏳', generating: '⚙️', pending_approval: '📧', 
@@ -362,7 +363,7 @@ async function renderCalendar() {
                 innerHtml += `
                     <div style="${borderStyle}">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
-                            <span class="calendar-post-tag ${tagClass}" style="margin:0;">${entry.format.toUpperCase()}</span>
+                            <span class="calendar-post-tag ${tagClass}" style="margin:0;">${displayFormat.toUpperCase()}</span>
                             <span class="calendar-post-status ${statusClass}" style="position:static; padding:2px 4px; font-size:0.6rem;">${statusLabels[entry.status] || ''}</span>
                         </div>
                         ${conceptHtml}

@@ -255,6 +255,7 @@
 .calendar-tag-single { background: rgba(0, 212, 255, 0.15); color: #00d4ff; }
 .calendar-tag-carousel { background: rgba(224, 64, 251, 0.15); color: #e040fb; }
 .calendar-tag-video { background: rgba(255, 23, 68, 0.15); color: #ff1744; }
+.calendar-tag-video-imagen { background: rgba(255, 110, 64, 0.18); color: #ff6e40; }
 .calendar-tag-flyer { background: rgba(255, 145, 0, 0.15); color: #ff9100; }
 .calendar-tag-price-story { background: rgba(0, 230, 118, 0.15); color: #00e676; }
 .calendar-tag-news-post { background: rgba(255, 235, 59, 0.15); color: #ffeb3b; }
