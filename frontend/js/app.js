@@ -281,6 +281,7 @@ async function forcePlan() {
 
 let currentSchedule = [];
 let editingDay = null;
+let editingEntryIndex = 0;
 
 async function openCalendar() {
     document.getElementById('calendar-modal').style.display = 'flex';
@@ -380,7 +381,7 @@ async function renderCalendar() {
     }
 }
 
-function openDayEditor(day) {
+function openDayEditor(day, entryIdx) {
     editingDay = day;
     const editor = document.getElementById('day-editor');
     editor.classList.remove('hidden');
@@ -390,9 +391,48 @@ function openDayEditor(day) {
     document.getElementById('day-editor-title').textContent = `${day} de ${monthNames[now.getMonth()]}`;
 
     const entries = currentSchedule.filter(e => e.day === day);
-    let entry = entries.find(e => e.format !== 'price-story' && e.format !== 'news-post');
-    if (!entry && entries.length > 0) entry = entries[0];
 
+    // Renderizar selector de entradas si hay más de una
+    let selectorContainer = document.getElementById('entry-selector');
+    if (!selectorContainer) {
+        selectorContainer = document.createElement('div');
+        selectorContainer.id = 'entry-selector';
+        const body = document.querySelector('.day-editor-body');
+        body.parentNode.insertBefore(selectorContainer, body);
+    }
+
+    if (entries.length > 1) {
+        const selectedIdx = (typeof entryIdx === 'number') ? entryIdx : 0;
+        editingEntryIndex = selectedIdx;
+        const formatLabels = {
+            'single': 'POST', 'carousel': 'CAROUSEL', 'video': 'VIDEO',
+            'price-story': 'PRECIOS', 'news-post': 'NOTICIA', 'flyer': 'FLYER'
+        };
+        selectorContainer.innerHTML = entries.map((e, idx) => {
+            const label = formatLabels[e.format] || e.format.toUpperCase();
+            const activeClass = idx === selectedIdx ? 'entry-tab-active' : '';
+            return `<button class="entry-tab ${activeClass}" onclick="openDayEditor(${day}, ${idx})">${label} ${e.hour}</button>`;
+        }).join('');
+        selectorContainer.style.display = 'flex';
+    } else {
+        editingEntryIndex = 0;
+        selectorContainer.innerHTML = '';
+        selectorContainer.style.display = 'none';
+    }
+
+    const entry = entries[editingEntryIndex] || null;
+    loadEntryIntoEditor(entry);
+
+    // Highlight del día seleccionado
+    document.querySelectorAll('.calendar-day').forEach(c => c.classList.remove('calendar-day-selected'));
+    const cells = document.querySelectorAll('.calendar-day:not(.calendar-day-empty)');
+    cells.forEach(c => {
+        const num = parseInt(c.querySelector('.calendar-day-number')?.textContent);
+        if (num === day) c.classList.add('calendar-day-selected');
+    });
+}
+
+function loadEntryIntoEditor(entry) {
     if (entry) {
         document.getElementById('edit-hour').value = entry.hour || '12:00';
         document.getElementById('edit-format').value = entry.format || 'single';
@@ -410,7 +450,6 @@ function openDayEditor(day) {
             statusInfo.innerHTML = `<span class="status-unlinked">Sin post generado aún</span>`;
         }
 
-        // Mostrar botón GENERAR solo si el estado es 'planned'
         const generateBtn = document.getElementById('generate-btn');
         generateBtn.style.display = entry.status === 'planned' ? 'block' : 'none';
     } else {
@@ -423,18 +462,8 @@ function openDayEditor(day) {
         document.getElementById('edit-briefing').value = '';
         document.getElementById('edit-status').value = 'planned';
         document.getElementById('edit-status-info').innerHTML = '';
-
-        // Nueva entrada: mostrar botón GENERAR
         document.getElementById('generate-btn').style.display = 'none';
     }
-
-    // Highlight del día seleccionado
-    document.querySelectorAll('.calendar-day').forEach(c => c.classList.remove('calendar-day-selected'));
-    const cells = document.querySelectorAll('.calendar-day:not(.calendar-day-empty)');
-    cells.forEach(c => {
-        const num = parseInt(c.querySelector('.calendar-day-number')?.textContent);
-        if (num === day) c.classList.add('calendar-day-selected');
-    });
 }
 
 function closeDayEditor() {
@@ -458,7 +487,7 @@ async function saveDayEntry() {
     };
 
     try {
-        const res = await fetch(`${API_BASE}/bot/schedule/${editingDay}`, {
+        const res = await fetch(`${API_BASE}/bot/schedule/${editingDay}/${editingEntryIndex}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updates)
@@ -466,7 +495,7 @@ async function saveDayEntry() {
         const data = await res.json();
         if (data.success) {
             await renderCalendar();
-            openDayEditor(editingDay);
+            openDayEditor(editingDay, editingEntryIndex);
         }
     } catch (e) {
         console.error('Error guardando entrada:', e);
@@ -475,14 +504,23 @@ async function saveDayEntry() {
 
 async function deleteDayEntry() {
     if (!editingDay) return;
-    if (!confirm(`¿Eliminar la planificación del día ${editingDay}?`)) return;
+    const entries = currentSchedule.filter(e => e.day === editingDay);
+    const entry = entries[editingEntryIndex];
+    const label = entry ? `${entry.format.toUpperCase()} (${entry.hour})` : `día ${editingDay}`;
+    if (!confirm(`¿Eliminar la entrada "${label}" del día ${editingDay}?`)) return;
 
     try {
-        const res = await fetch(`${API_BASE}/bot/schedule/${editingDay}`, { method: 'DELETE' });
+        const res = await fetch(`${API_BASE}/bot/schedule/${editingDay}/${editingEntryIndex}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.success) {
-            closeDayEditor();
             await renderCalendar();
+            // Si quedan más entradas, abrir la primera; si no, cerrar editor
+            const remaining = currentSchedule.filter(e => e.day === editingDay);
+            if (remaining.length > 0) {
+                openDayEditor(editingDay, 0);
+            } else {
+                closeDayEditor();
+            }
         }
     } catch (e) {
         console.error('Error eliminando entrada:', e);
@@ -498,7 +536,7 @@ async function executeDayEntry() {
     generateBtn.textContent = '⏳ GENERANDO...';
 
     try {
-        const res = await fetch(`${API_BASE}/bot/execute/${editingDay}`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/bot/execute/${editingDay}/${editingEntryIndex}`, { method: 'POST' });
         const data = await res.json();
 
         if (data.success) {

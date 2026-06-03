@@ -104,7 +104,7 @@ class BotStateService {
   }
 
   /**
-   * Actualiza el estado de un día específico del calendario.
+   * Actualiza el estado de un día específico del calendario (primera entrada).
    * @param {number} day - Día del mes (1-31)
    * @param {object} updates - Campos a actualizar (status, postId, etc.)
    */
@@ -113,6 +113,21 @@ class BotStateService {
     const entry = state.schedule.find(e => e.day === day);
     if (entry) {
       Object.assign(entry, updates);
+      this._write(state);
+    }
+  }
+
+  /**
+   * Actualiza una entrada específica de un día por su índice.
+   * @param {number} day - Día del mes
+   * @param {number} index - Índice de la entrada dentro de las del día (0-based)
+   * @param {object} updates - Campos a actualizar
+   */
+  updateScheduleEntry(day, index, updates) {
+    const state = this._read();
+    const dayEntries = state.schedule.filter(e => e.day === day);
+    if (dayEntries[index]) {
+      Object.assign(dayEntries[index], updates);
       this._write(state);
     }
   }
@@ -128,7 +143,25 @@ class BotStateService {
     const state = this._read();
     state.schedule = state.schedule.filter(e => e.day !== day);
     this._write(state);
-    console.log(`[BotState] Entrada del día ${day} eliminada.`);
+    console.log(`[BotState] Todas las entradas del día ${day} eliminadas.`);
+  }
+
+  /**
+   * Elimina una entrada específica de un día por su índice.
+   * @param {number} day - Día del mes
+   * @param {number} index - Índice de la entrada dentro de las del día (0-based)
+   */
+  removeScheduleEntryByIndex(day, index) {
+    const state = this._read();
+    const dayEntries = state.schedule.filter(e => e.day === day);
+    if (dayEntries[index]) {
+      const globalIdx = state.schedule.indexOf(dayEntries[index]);
+      if (globalIdx !== -1) {
+        state.schedule.splice(globalIdx, 1);
+        this._write(state);
+        console.log(`[BotState] Entrada #${index} del día ${day} eliminada.`);
+      }
+    }
   }
 
   addPendingApproval(postData) {

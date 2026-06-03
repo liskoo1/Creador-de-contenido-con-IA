@@ -744,34 +744,43 @@ app.post('/api/bot/force-plan', async (req, res) => {
   }
 });
 
-app.put('/api/bot/schedule/:day', (req, res) => {
+app.put('/api/bot/schedule/:day/:index?', (req, res) => {
   const day = parseInt(req.params.day);
+  const index = req.params.index !== undefined ? parseInt(req.params.index) : 0;
   const updates = req.body;
   const schedule = botStateService.getSchedule();
-  const entry = schedule.find(e => e.day === day);
+  const dayEntries = schedule.filter(e => e.day === day);
 
-  if (!entry) {
+  if (dayEntries.length === 0) {
     const newEntry = { day, status: 'planned', postId: null, ...updates };
     botStateService.addScheduleEntry(newEntry);
     return res.json({ success: true, entry: newEntry });
   }
 
-  botStateService.updateScheduleDay(day, updates);
-  res.json({ success: true, entry: { ...entry, ...updates } });
+  botStateService.updateScheduleEntry(day, index, updates);
+  res.json({ success: true, entry: { ...dayEntries[index], ...updates } });
 });
 
-app.delete('/api/bot/schedule/:day', (req, res) => {
+app.delete('/api/bot/schedule/:day/:index?', (req, res) => {
   const day = parseInt(req.params.day);
-  botStateService.removeScheduleEntry(day);
+  const index = req.params.index !== undefined ? parseInt(req.params.index) : null;
+  
+  if (index !== null) {
+    botStateService.removeScheduleEntryByIndex(day, index);
+  } else {
+    botStateService.removeScheduleEntry(day);
+  }
   res.json({ success: true });
 });
 
-app.post('/api/bot/execute/:day', async (req, res) => {
+app.post('/api/bot/execute/:day/:index?', async (req, res) => {
   const day = parseInt(req.params.day);
+  const index = req.params.index !== undefined ? parseInt(req.params.index) : 0;
   const schedule = botStateService.getSchedule();
-  const entry = schedule.find(e => e.day === day);
+  const dayEntries = schedule.filter(e => e.day === day);
+  const entry = dayEntries[index];
 
-  if (!entry) return res.status(404).json({ error: 'No hay entrada para ese día' });
+  if (!entry) return res.status(404).json({ error: 'No hay entrada para ese día/índice' });
   if (entry.status !== 'planned') return res.status(400).json({ error: `El estado actual es '${entry.status}', debe ser 'planned'` });
 
   res.json({ success: true, message: `Generando contenido para el día ${day} (${entry.format})...` });
