@@ -808,7 +808,7 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
   const schedule = botStateService.getSchedule();
   const entry = schedule.find(e => e.postId === postId);
   if (entry) {
-    botStateService.updateScheduleDay(entry.day, { status: 'approved' });
+    botStateService.updateScheduleEntryByPostId(postId, { status: 'approved' });
   }
   botStateService.removePendingApproval(postId);
 
@@ -827,7 +827,7 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
       } else {
         await publishingService.publishViaBridge(post.visuals[0], 'image', caption);
       }
-      if (entry) botStateService.updateScheduleDay(entry.day, { status: 'published' });
+      if (entry) botStateService.updateScheduleEntryByPostId(postId, { status: 'published' });
     }
   } catch (e) {
     console.error('[Webhook] Error publicando:', e.message);
@@ -846,7 +846,7 @@ app.get('/api/webhooks/reject/:postId', async (req, res) => {
   const schedule = botStateService.getSchedule();
   const entry = schedule.find(e => e.postId === postId);
   if (entry) {
-    botStateService.updateScheduleDay(entry.day, { status: 'planned', postId: null });
+    botStateService.updateScheduleEntryByPostId(postId, { status: 'planned', postId: null });
   }
   botStateService.removePendingApproval(postId);
 

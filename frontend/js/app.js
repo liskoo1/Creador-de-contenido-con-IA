@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadKnowledge();
     setupEventListeners();
     loadBotState();
+    setInterval(pollBotStatus, 15000); // Polling cada 15s para actualizar el texto del autopilot
     loadProductContext();
     setupProductContextListeners();
 });
@@ -174,7 +175,12 @@ async function loadBotState() {
         if (state.isAutoPilotActive) {
             label.textContent = 'AUTO-PILOT ON';
             label.classList.add('autopilot-active-label');
-            const nextPost = state.schedule.find(e => e.status === 'planned');
+            const now = new Date();
+            const currentDay = now.getDate();
+            // Buscar la próxima entrada planeada (empezando desde el día actual)
+            let nextPost = state.schedule.find(e => e.day >= currentDay && e.status === 'planned');
+            if (!nextPost) nextPost = state.schedule.find(e => e.status === 'planned'); // fallback por si acaso
+            
             status.textContent = nextPost 
                 ? `Próximo: Día ${nextPost.day} a las ${nextPost.hour}` 
                 : 'Sin posts pendientes';
@@ -187,6 +193,40 @@ async function loadBotState() {
         renderAllowedFormats(state.allowedFormats);
     } catch (e) {
         console.error('Error cargando estado del bot:', e);
+    }
+}
+
+async function pollBotStatus() {
+    try {
+        const response = await fetch(`${API_BASE}/bot/state`);
+        const state = await response.json();
+        
+        const label = document.getElementById('autopilot-label');
+        const status = document.getElementById('autopilot-status');
+        const toggle = document.getElementById('autopilot-toggle');
+        
+        if (toggle.checked !== state.isAutoPilotActive) {
+            toggle.checked = state.isAutoPilotActive;
+        }
+
+        if (state.isAutoPilotActive) {
+            label.textContent = 'AUTO-PILOT ON';
+            label.classList.add('autopilot-active-label');
+            const now = new Date();
+            const currentDay = now.getDate();
+            let nextPost = state.schedule.find(e => e.day >= currentDay && e.status === 'planned');
+            if (!nextPost) nextPost = state.schedule.find(e => e.status === 'planned');
+            
+            status.textContent = nextPost 
+                ? `Próximo: Día ${nextPost.day} a las ${nextPost.hour}` 
+                : 'Sin posts pendientes';
+        } else {
+            label.textContent = 'AUTO-PILOT OFF';
+            label.classList.remove('autopilot-active-label');
+            status.textContent = 'Sistema en modo manual';
+        }
+    } catch (e) {
+        // Silencioso en el polling
     }
 }
 

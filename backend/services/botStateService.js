@@ -132,6 +132,20 @@ class BotStateService {
     }
   }
 
+  /**
+   * Actualiza una entrada buscando por su postId.
+   * @param {string} postId 
+   * @param {object} updates 
+   */
+  updateScheduleEntryByPostId(postId, updates) {
+    const state = this._read();
+    const entry = state.schedule.find(e => e.postId === postId);
+    if (entry) {
+      Object.assign(entry, updates);
+      this._write(state);
+    }
+  }
+
   addScheduleEntry(entry) {
     const state = this._read();
     state.schedule.push(entry);
