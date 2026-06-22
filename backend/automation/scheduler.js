@@ -34,12 +34,12 @@ class Scheduler {
       await this.runMonthlyPlanning();
     }, { timezone: "Europe/Madrid" });
 
-    // Cron Diario: Cada hora en punto para comprobar si toca publicar
-    this.dailyJob = cron.schedule('0 * * * *', async () => {
+    // Cron Diario: Cada 30 minutos para comprobar si toca publicar
+    this.dailyJob = cron.schedule('0,30 * * * *', async () => {
       await this.checkAndExecute();
     }, { timezone: "Europe/Madrid" });
 
-    console.log(`[Scheduler] Temporizadores activos (Mensual: día 1, Diario: cada hora).`);
+    console.log(`[Scheduler] Temporizadores activos (Mensual: día 1, Diario: cada 30 min).`);
 
     // Al arrancar, comprobamos el estado inicial
     this.checkInitialState();
@@ -191,9 +191,8 @@ class Scheduler {
   }
 
   /**
-   * Comprueba cada hora si hay un post programado para ejecutar.
-   * Genera el contenido 2 horas antes de la hora programada para dar tiempo
-   * a la revisión y aprobación.
+   * Comprueba periódicamente si hay un post programado para ejecutar.
+   * Genera el contenido en la hora programada o después.
    */
   async checkAndExecute() {
     if (!botStateService.isActive()) {
@@ -220,14 +219,13 @@ class Scheduler {
     const [schedHour, schedMin] = todayEntry.hour.split(':').map(Number);
     const scheduledMinutes = schedHour * 60 + (schedMin || 0);
 
-    // Ventana de ejecución: desde 2 horas antes hasta 30 min después de la hora programada
-    const prepWindowStart = scheduledMinutes - 120;
-    const prepWindowEnd = scheduledMinutes + 30;
+    // Ventana de ejecución: desde la hora programada en adelante
+    const prepWindowStart = scheduledMinutes;
 
-    console.log(`[Scheduler] checkAndExecute: Día=${currentDay}, Hora actual=${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} (${currentMinutes}min), Programado=${todayEntry.hour} (${scheduledMinutes}min), Ventana=[${prepWindowStart}-${prepWindowEnd}]`);
+    console.log(`[Scheduler] checkAndExecute: Día=${currentDay}, Hora actual=${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} (${currentMinutes}min), Programado=${todayEntry.hour} (${scheduledMinutes}min)`);
 
-    if (currentMinutes < prepWindowStart || currentMinutes > prepWindowEnd) {
-      console.log(`[Scheduler] checkAndExecute: Fuera de la ventana de ejecución.`);
+    if (currentMinutes < prepWindowStart) {
+      console.log(`[Scheduler] checkAndExecute: Aún no es la hora de ejecución (programado para las ${todayEntry.hour}).`);
       return;
     }
 
