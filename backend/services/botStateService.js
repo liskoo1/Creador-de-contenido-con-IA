@@ -28,7 +28,9 @@ class BotStateService {
         ],
         currentMonth: null,
         schedule: [],
-        pendingApproval: []
+        pendingApproval: [],
+        instagramToken: null,
+        instagramAccountId: null
       });
     }
   }
@@ -192,6 +194,27 @@ class BotStateService {
 
   getPendingApprovals() {
     return this._read().pendingApproval;
+  }
+
+  setInstagramCredentials(token, accountId) {
+    const state = this._read();
+    state.instagramToken = token;
+    state.instagramAccountId = accountId;
+    this._write(state);
+    console.log(`[BotState] Credenciales de Instagram guardadas exitosamente.`);
+  }
+
+  getInstagramCredentials() {
+    const state = this._read();
+    return {
+      token: state.instagramToken,
+      accountId: state.instagramAccountId
+    };
+  }
+
+  isInstagramConnected() {
+    const state = this._read();
+    return !!(state.instagramToken && state.instagramAccountId);
   }
 }
 

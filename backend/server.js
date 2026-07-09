@@ -707,7 +707,101 @@ app.post('/api/agro/auto-daily', async (req, res) => {
  */
 
 app.get('/api/bot/state', (req, res) => {
-  res.json(botStateService.getState());
+  const state = botStateService.getState();
+  state.isInstagramConnected = botStateService.isInstagramConnected();
+  res.json(state);
+});
+
+/**
+ * ============================================
+ * ENDPOINTS DE AUTENTICACIÓN (INSTAGRAM OAUTH)
+ * ============================================
+ */
+
+app.get('/api/auth/instagram', (req, res) => {
+  const appId = process.env.INSTAGRAM_APP_ID;
+  const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
+  const redirectUri = `${serverUrl}/api/auth/instagram/callback`;
+  if (!appId) {
+    return res.status(500).send('Falta INSTAGRAM_APP_ID en el archivo .env');
+  }
+
+  const authUrl = `https://www.facebook.com/v25.0/dialog/oauth?client_id=${appId}&display=page&extras={"setup":{"channel":"IG_API"}}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=instagram_content_publish,instagram_manage_insights`;
+  res.redirect(authUrl);
+});
+
+app.get('/api/auth/instagram/callback', async (req, res) => {
+  const { code, error, error_description } = req.query;
+  const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
+  const redirectUri = `${serverUrl}/api/auth/instagram/callback`;
+
+  if (error) {
+    console.error('[OAuth] Error:', error_description);
+    return res.status(400).send(`Error de autenticación: ${error_description}`);
+  }
+
+  if (!code) {
+    return res.status(400).send('No se recibió el código de autorización.');
+  }
+
+  try {
+    const appId = process.env.INSTAGRAM_APP_ID;
+    const appSecret = process.env.INSTAGRAM_APP_SECRET;
+
+    // 1. Obtener token corto
+    const tokenRes = await fetch(`https://graph.facebook.com/v25.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`);
+    const tokenData = await tokenRes.json();
+    
+    if (tokenData.error) {
+      throw new Error(`Error obteniendo token corto: ${tokenData.error.message}`);
+    }
+    const shortToken = tokenData.access_token;
+
+    // 2. Intercambiar por token de larga duración
+    const longTokenRes = await fetch(`https://graph.facebook.com/v25.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortToken}`);
+    const longTokenData = await longTokenRes.json();
+    
+    if (longTokenData.error) {
+      throw new Error(`Error obteniendo token largo: ${longTokenData.error.message}`);
+    }
+    const longToken = longTokenData.access_token;
+
+    // 3. Obtener el Account ID (Buscando la cuenta de Instagram asociada a las páginas de FB)
+    const meRes = await fetch(`https://graph.facebook.com/v25.0/me/accounts?fields=instagram_business_account{id,username}&access_token=${longToken}`);
+    const meData = await meRes.json();
+    
+    if (meData.error) {
+      throw new Error(`Error obteniendo account ID: ${meData.error.message}`);
+    }
+
+    let igAccountId = null;
+    let igUsername = 'Desconocido';
+
+    if (meData.data && meData.data.length > 0) {
+      // Buscar la primera página que tenga una cuenta de Instagram de negocio vinculada
+      const pageWithIg = meData.data.find(page => page.instagram_business_account);
+      if (pageWithIg) {
+        igAccountId = pageWithIg.instagram_business_account.id;
+        igUsername = pageWithIg.instagram_business_account.username || 'Desconocido';
+      }
+    }
+
+    // Si la API no lo encuentra, usamos el de fallback que había en el .env antes
+    if (!igAccountId) {
+      console.warn('[OAuth] No se pudo encontrar un Instagram Account ID automáticamente. Revisa si la cuenta de IG está vinculada a la página de FB. Usando fallback del .env si existe.');
+      igAccountId = process.env.INSTAGRAM_ACCOUNT_ID || '2145891532900546'; // Fallback a la que usaba el usuario
+    }
+
+    // 4. Guardar en el estado
+    botStateService.setInstagramCredentials(longToken, igAccountId);
+    console.log(`\x1b[32m[OAuth] ✅ Instagram conectado exitosamente. Cuenta: ${igUsername} (${igAccountId})\x1b[0m`);
+
+    // 5. Redirigir de vuelta al frontend
+    res.redirect('/');
+  } catch (e) {
+    console.error('[OAuth] Error en el flujo:', e.message);
+    res.status(500).send(`Error en la integración: ${e.message}`);
+  }
 });
 
 app.post('/api/bot/toggle', (req, res) => {
