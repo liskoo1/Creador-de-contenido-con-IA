@@ -117,6 +117,14 @@
             <div class="status-panel">
                 <button class="hub-btn archive-btn" onclick="openArchive()">📁 SWARMS ARCHIVE</button>
                 <div class="sidebar-header" style="margin-top:15px">
+                    <h2>Social Accounts</h2>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <button class="hub-btn" id="connect-instagram-btn" onclick="window.location.href='/api/auth/instagram'" style="flex-grow: 1; margin-right: 10px;">📸 CONECTAR INSTAGRAM</button>
+                    <div id="instagram-status-circle" style="width: 15px; height: 15px; border-radius: 50%; background-color: #ff3b30; flex-shrink: 0; box-shadow: 0 0 5px rgba(0,0,0,0.5);" title="Desconectado"></div>
+                </div>
+
+                <div class="sidebar-header" style="margin-top:15px">
                     <h2>Agro Data</h2>
                 </div>
                 <button class="hub-btn" onclick="generatePriceStory()" style="border-color: #00e676; color: #00e676; width:100%; margin-bottom:8px;">📊 PRECIO DEL DIA</button>

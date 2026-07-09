@@ -190,6 +190,20 @@ async function loadBotState() {
             status.textContent = 'Sistema en modo manual';
         }
 
+        const igCircle = document.getElementById('instagram-status-circle');
+        const igBtn = document.getElementById('connect-instagram-btn');
+        if (state.isInstagramConnected) {
+            igCircle.style.backgroundColor = '#34c759';
+            igCircle.title = 'Conectado';
+            igBtn.textContent = '📸 INSTAGRAM CONECTADO';
+            igBtn.style.opacity = '0.7';
+        } else {
+            igCircle.style.backgroundColor = '#ff3b30';
+            igCircle.title = 'Desconectado';
+            igBtn.textContent = '📸 CONECTAR INSTAGRAM';
+            igBtn.style.opacity = '1';
+        }
+
         renderAllowedFormats(state.allowedFormats);
     } catch (e) {
         console.error('Error cargando estado del bot:', e);
@@ -224,6 +238,20 @@ async function pollBotStatus() {
             label.textContent = 'AUTO-PILOT OFF';
             label.classList.remove('autopilot-active-label');
             status.textContent = 'Sistema en modo manual';
+        }
+
+        const igCircle = document.getElementById('instagram-status-circle');
+        const igBtn = document.getElementById('connect-instagram-btn');
+        if (state.isInstagramConnected) {
+            igCircle.style.backgroundColor = '#34c759';
+            igCircle.title = 'Conectado';
+            igBtn.textContent = '📸 INSTAGRAM CONECTADO';
+            igBtn.style.opacity = '0.7';
+        } else {
+            igCircle.style.backgroundColor = '#ff3b30';
+            igCircle.title = 'Desconectado';
+            igBtn.textContent = '📸 CONECTAR INSTAGRAM';
+            igBtn.style.opacity = '1';
         }
     } catch (e) {
         // Silencioso en el polling
