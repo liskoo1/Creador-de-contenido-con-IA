@@ -726,7 +726,7 @@ app.get('/api/auth/instagram', (req, res) => {
     return res.status(500).send('Falta INSTAGRAM_APP_ID en el archivo .env');
   }
 
-  const authUrl = `https://www.facebook.com/v25.0/dialog/oauth?client_id=${appId}&display=page&extras={"setup":{"channel":"IG_API"}}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=instagram_content_publish,instagram_manage_insights`;
+  const authUrl = `https://www.facebook.com/v25.0/dialog/oauth?client_id=${appId}&display=page&extras={"setup":{"channel":"IG_API"}}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=instagram_basic,instagram_content_publish,instagram_manage_insights,pages_show_list,pages_read_engagement`;
   res.redirect(authUrl);
 });
 
