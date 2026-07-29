@@ -11,7 +11,8 @@ class PublishingService {
    * @param {string} type 'image' | 'story' | 'reel' | 'carousel'
    * @param {any} extra Caption IG o tipo de historia (IMAGE/VIDEO)
    * @param {string|null} facebookCaption Caption FB (si null, reutiliza el de IG)
-   * @param {{ platforms?: Array<'instagram'|'facebook'> }} options
+   * @param {{ platforms?: Array<'instagram'|'facebook'>, facebookAsPageStory?: boolean }} options
+   *   facebookAsPageStory: solo price-story → historia 24h en la Page; el resto de stories van al feed.
    */
   async publishViaBridge(localPath, type, extra, facebookCaption = null, options = {}) {
     const serverUrl = (process.env.SERVER_URL || 'http://localhost:3001').trim().replace(/\/+$/, '');
@@ -20,6 +21,7 @@ class PublishingService {
       : ['instagram', 'facebook'];
     const doIg = platforms.includes('instagram');
     const doFb = platforms.includes('facebook');
+    const facebookAsPageStory = options.facebookAsPageStory === true;
 
     const toPublicUrl = (p) => {
       if (typeof p === 'string' && p.startsWith('http') && !p.startsWith('http://localhost')) {
@@ -78,8 +80,11 @@ class PublishingService {
           } else {
             const publicUrl = toPublicUrl(localPath);
             console.log(`[PublishingService] FB ${type}: ${publicUrl}`);
-            if (type === 'story') results.facebook = await facebookPublisher.publishStory(publicUrl, storyMediaType);
-            else if (type === 'reel') results.facebook = await facebookPublisher.publishVideo(publicUrl, fbCaption);
+            if (type === 'story') {
+              results.facebook = await facebookPublisher.publishStory(publicUrl, storyMediaType, {
+                asPageStory: facebookAsPageStory
+              });
+            } else if (type === 'reel') results.facebook = await facebookPublisher.publishVideo(publicUrl, fbCaption);
             else results.facebook = await facebookPublisher.publishImage(publicUrl, fbCaption);
           }
         } catch (e) {

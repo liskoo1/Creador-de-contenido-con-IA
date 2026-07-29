@@ -517,7 +517,10 @@ app.post('/api/publish/:id', async (req, res) => {
   try {
     let result;
     if (contentType === 'price-story' && post.visuals && post.visuals.length >= 1) {
-      result = await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption, publishOpts);
+      result = await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption, {
+        ...publishOpts,
+        facebookAsPageStory: true
+      });
 
     } else if (hasVideo && (contentType === 'video' || contentType === 'audio-reel' || contentType === 'reel')) {
       result = await publishingService.publishViaBridge(post.video.url, 'reel', caption, fbCaption, publishOpts);
@@ -918,7 +921,9 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
       await publishingService.publishViaBridge(post.video.url, 'reel', caption, fbCaption);
     } else if (post.visuals && post.visuals.length > 0) {
       if (post.contentType === 'price-story') {
-        await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption);
+        await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption, {
+          facebookAsPageStory: true
+        });
       } else if (post.visuals.length > 1) {
         await publishingService.publishViaBridge(post.visuals, 'carousel', caption, fbCaption);
       } else {

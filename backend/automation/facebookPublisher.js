@@ -7,6 +7,7 @@
  * Permisos necesarios al generar el User token (antes de intercambiar por Page token):
  *   pages_show_list, pages_read_engagement, pages_manage_posts
  *   (+ publish_video recomendado si Graph Explorer / App Review lo ofrece)
+ * Stories de Page: photo_stories / video_stories (mismo pages_manage_posts).
  * El usuario debe tener tarea CREATE_CONTENT (o Admin) en la Page.
  */
 const GRAPH_BASE = 'https://graph.facebook.com/v25.0';
@@ -230,11 +231,135 @@ class FacebookPublisher {
     }
   }
 
-  /** Stories de Page: se publican como post de feed. */
-  async publishStory(mediaUrl, mediaType = 'IMAGE') {
-    console.log('[Facebook] Story → feed de la Page...');
-    if (mediaType === 'VIDEO') return this.publishVideo(mediaUrl, '');
-    return this.publishImage(mediaUrl, '');
+  /**
+   * @param {string} mediaUrl
+   * @param {string} mediaType 'IMAGE' | 'VIDEO'
+   * @param {{ asPageStory?: boolean }} options
+   *   asPageStory=true → Stories API (24h). Solo usar para price-story por ahora.
+   *   asPageStory=false/omitido → post de feed (comportamiento anterior).
+   */
+  async publishStory(mediaUrl, mediaType = 'IMAGE', options = {}) {
+    const asPageStory = options.asPageStory === true;
+
+    if (!asPageStory) {
+      console.log('[Facebook] Story → feed de la Page (no es price-story)...');
+      if (String(mediaType).toUpperCase() === 'VIDEO') return this.publishVideo(mediaUrl, '');
+      return this.publishImage(mediaUrl, '');
+    }
+
+    const { pageId, pageToken } = this._getCredentials();
+
+    if (!pageId || !pageToken) {
+      console.warn('[Facebook] Credenciales no configuradas. Story simulada.');
+      return { success: false, mock: true, message: 'Credenciales de Facebook no configuradas.', platform: 'facebook' };
+    }
+
+    this._ensurePublicUrl(mediaUrl);
+
+    try {
+      if (String(mediaType).toUpperCase() === 'VIDEO') {
+        return await this._publishVideoStory(pageId, pageToken, mediaUrl);
+      }
+      return await this._publishPhotoStory(pageId, pageToken, mediaUrl);
+    } catch (error) {
+      console.error('[Facebook] Error publicando Story:', error.message);
+      return { success: false, error: error.message, platform: 'facebook' };
+    }
+  }
+
+  async _publishPhotoStory(pageId, pageToken, imageUrl) {
+    console.log(`[Facebook] Subiendo foto unpublished para Story (Page ${pageId})...`);
+
+    const uploadParams = new URLSearchParams();
+    uploadParams.append('url', imageUrl);
+    uploadParams.append('published', 'false');
+    uploadParams.append('access_token', pageToken);
+
+    const uploadRes = await fetch(`${GRAPH_BASE}/${pageId}/photos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: uploadParams.toString()
+    });
+    const uploadData = await uploadRes.json();
+    if (uploadData.error) throw new Error(this._formatGraphError(uploadData, 'Error subiendo foto para Story'));
+    if (!uploadData.id) throw new Error('Meta no devolvió photo_id para la Story.');
+
+    console.log(`[Facebook] Publicando photo_stories con photo_id=${uploadData.id}...`);
+    const storyParams = new URLSearchParams();
+    storyParams.append('photo_id', uploadData.id);
+    storyParams.append('access_token', pageToken);
+
+    const storyRes = await fetch(`${GRAPH_BASE}/${pageId}/photo_stories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: storyParams.toString()
+    });
+    const storyData = await storyRes.json();
+    if (storyData.error) throw new Error(this._formatGraphError(storyData, 'Error en photo_stories'));
+
+    const postId = storyData.post_id || storyData.id;
+    console.log(`\x1b[32m[Facebook] ✅ Story (foto) publicada. ID: ${postId}\x1b[0m`);
+    return { success: true, postId, platform: 'facebook', mediaType: 'story' };
+  }
+
+  async _publishVideoStory(pageId, pageToken, videoUrl) {
+    await this._assertPageAccessToken();
+    console.log(`[Facebook] Iniciando video_stories (Page ${pageId})...`);
+
+    const startParams = new URLSearchParams();
+    startParams.append('upload_phase', 'start');
+    startParams.append('access_token', pageToken);
+
+    const startRes = await fetch(`${GRAPH_BASE}/${pageId}/video_stories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: startParams.toString()
+    });
+    const startData = await startRes.json();
+    if (startData.error) {
+      const msg = this._formatGraphError(startData, 'Error iniciando video_stories');
+      if (this._isVideoPermissionError(msg)) throw new Error(`${msg} — ${VIDEO_PERMISSION_HINT}`);
+      throw new Error(msg);
+    }
+
+    const videoId = startData.video_id;
+    const uploadUrl = startData.upload_url;
+    if (!videoId || !uploadUrl) {
+      throw new Error('Meta no devolvió video_id/upload_url para la Story de vídeo.');
+    }
+
+    console.log(`[Facebook] Subiendo vídeo a upload_url (video_id=${videoId})...`);
+    const uploadRes = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `OAuth ${pageToken}`,
+        file_url: videoUrl
+      }
+    });
+    const uploadData = await uploadRes.json().catch(() => ({}));
+    if (uploadData.error) throw new Error(this._formatGraphError(uploadData, 'Error subiendo vídeo de Story'));
+    if (uploadData.success === false) {
+      throw new Error(uploadData.message || 'Meta rechazó el upload del vídeo de Story.');
+    }
+
+    console.log(`[Facebook] Finalizando video_stories (publish)...`);
+    const finishParams = new URLSearchParams();
+    finishParams.append('upload_phase', 'finish');
+    finishParams.append('video_id', videoId);
+    finishParams.append('video_state', 'PUBLISHED');
+    finishParams.append('access_token', pageToken);
+
+    const finishRes = await fetch(`${GRAPH_BASE}/${pageId}/video_stories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: finishParams.toString()
+    });
+    const finishData = await finishRes.json();
+    if (finishData.error) throw new Error(this._formatGraphError(finishData, 'Error finalizando video_stories'));
+
+    const postId = finishData.post_id || finishData.id || videoId;
+    console.log(`\x1b[32m[Facebook] ✅ Story (vídeo) publicada. ID: ${postId}\x1b[0m`);
+    return { success: true, postId, platform: 'facebook', mediaType: 'story' };
   }
 }
 
