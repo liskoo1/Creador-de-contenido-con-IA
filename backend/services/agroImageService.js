@@ -4,6 +4,93 @@ const geminiService = require('./geminiService');
 const agroDataService = require('./agroDataService');
 const productContextService = require('./productContextService');
 
+const NEWS_TEMPLATES = [
+  {
+    id: 'editorial-bottom',
+    prompt: (titulo, footerLine) => `Create a professional Instagram post image (1:1 square, 1080x1080px) for a news article.
+DESIGN: Square 1:1. Use the reference image as main visual. Semi-transparent dark gradient on the BOTTOM third.
+Headline in white bold sans-serif over the dark area: "${titulo}". Green/teal accent bar ABOVE the headline.${footerLine}
+Clean editorial/news aesthetic. Text fully readable. Polished social media composition.`
+  },
+  {
+    id: 'magazine-cover',
+    prompt: (titulo, footerLine) => `Create a bold magazine-cover style Instagram post (1:1, 1080x1080px).
+DESIGN: Reference image as full-bleed background with slight cinematic grade. Large stacked headline in the CENTER/UPPER half in heavy white typography with soft shadow: "${titulo}".
+Thin green accent line under the title. Minimal chrome, high-impact cover look.${footerLine}
+No clutter. Premium agricultural magazine vibe.`
+  },
+  {
+    id: 'split-panel',
+    prompt: (titulo, footerLine) => `Create a split-panel Instagram post (1:1, 1080x1080px) for agricultural news.
+DESIGN: Left 55% = reference photo full bleed. Right 45% = solid dark green/teal panel with the headline in white bold text: "${titulo}".
+Modern newspaper digital layout. Strong contrast. Clean sans-serif.${footerLine}
+Keep text fully readable on the panel side.`
+  },
+  {
+    id: 'top-banner',
+    prompt: (titulo, footerLine) => `Create an Instagram news post (1:1, 1080x1080px).
+DESIGN: Reference image fills the frame. A solid dark banner strip across the TOP with white headline: "${titulo}".
+Small green accent on the left edge of the banner. Contemporary broadcast-news look.${footerLine}
+Sharp, readable typography.`
+  },
+  {
+    id: 'quote-focus',
+    prompt: (titulo, footerLine) => `Create an Instagram post (1:1, 1080x1080px) with quote/impact style.
+DESIGN: Softened/desaturated reference image background. Large translucent dark card centered with headline: "${titulo}".
+Accent quotation mark or green corner marks. Modern NGO/press release aesthetic.${footerLine}
+High readability, elegant spacing.`
+  },
+  {
+    id: 'map-region',
+    prompt: (titulo, footerLine) => `Create an Instagram post (1:1, 1080x1080px) with regional/Almería agricultural identity.
+DESIGN: Use reference image. Overlay subtle greenhouse/map texture in corners. Headline in lower third on dark frosted glass: "${titulo}".
+Warm Mediterranean light grade, green accents, sense of place (Andalusia / Almería).${footerLine}
+Professional and local.`
+  }
+];
+
+const PRICE_TEMPLATES = [
+  {
+    id: 'dark-grid',
+    build: (ctx) => `Create a professional Instagram Story image (9:16, 1080x1920px) showing 6 price cards${ctx.industry}.
+DESIGN: Vertical 9:16, dark background with subtle texture.
+Header: "${ctx.headerTitle}" bold white. Date "${ctx.fecha}" in cyan/teal.
+6 glass cards in 2-column 3-row grid. Product name white, price large cyan with €/kg.
+${ctx.footerText ? `Footer: "${ctx.footerText}"` : ''}
+Green/teal accents. Modern market dashboard.${ctx.cardsText}
+Use exact product names and prices. MUST be 9:16.`
+  },
+  {
+    id: 'light-cards',
+    build: (ctx) => `Create a bright Instagram Story (9:16, 1080x1920px) with 6 produce price cards${ctx.industry}.
+DESIGN: Soft cream/light green gradient background. Header "${ctx.headerTitle}" in deep green.
+Date "${ctx.fecha}" in muted olive. 6 white rounded cards with soft shadow in 2x3 grid.
+Product names dark, prices in bold emerald green with €/kg.
+${ctx.footerText ? `Footer small: "${ctx.footerText}"` : ''}
+Fresh, clean, supermarket flyer energy.${ctx.cardsText}
+Exact names/prices. MUST be 9:16.`
+  },
+  {
+    id: 'ranking-list',
+    build: (ctx) => `Create an Instagram Story (9:16, 1080x1920px) as a vertical RANKING LIST of 6 crop prices${ctx.industry}.
+DESIGN: Dark navy background. Header "${ctx.headerTitle}" + "${ctx.fecha}".
+Six horizontal rows (not a grid): left product name, right big price €/kg, thin dividers.
+Accent teal highlights on prices. Minimal, data-forward.
+${ctx.footerText ? `Footer: "${ctx.footerText}"` : ''}
+${ctx.cardsText}
+Exact names/prices. MUST be 9:16.`
+  },
+  {
+    id: 'hero-plus-grid',
+    build: (ctx) => `Create an Instagram Story (9:16, 1080x1920px) for daily produce prices${ctx.industry}.
+DESIGN: Top third = bold hero title "${ctx.headerTitle}" over abstract greenhouse/field texture, date "${ctx.fecha}".
+Bottom two-thirds = 6 compact cards in 2x3 with dark glass look and green accents.
+${ctx.footerText ? `Footer: "${ctx.footerText}"` : ''}
+${ctx.cardsText}
+Exact names/prices. MUST be 9:16.`
+  }
+];
+
 class AgroImageService {
   _ensureOutputDir() {
     const dir = path.join(__dirname, '..', process.env.AGRO_PRICE_CARD_OUTPUT_DIR || 'output/agro/');
@@ -13,12 +100,11 @@ class AgroImageService {
     return dir;
   }
 
-  /**
-   * Genera una imagen 9:16 con 6 cards de precios.
-   * Usa el contexto del producto para branding.
-   * @param {Array} prices - Array de { NombreProductoCompleto, Precio, Fecha }
-   * @returns {Promise<Object>} - { url, path } de la imagen generada
-   */
+  _pickTemplate(list, seed) {
+    const n = Math.abs(Number(seed) || Date.now());
+    return list[n % list.length];
+  }
+
   async generatePriceCardImage(prices) {
     if (!prices || prices.length === 0) {
       throw new Error('No hay precios para generar la imagen.');
@@ -33,55 +119,32 @@ class AgroImageService {
       day: 'numeric', month: 'long', year: 'numeric'
     });
 
-    const cardsData = prices.map(p => {
-      const nombre = p.NombreProductoCompleto;
-      const precio = parseFloat(p.Precio).toFixed(2);
-      return { nombre, precio };
-    });
+    const cardsData = prices.map(p => ({
+      nombre: p.NombreProductoCompleto,
+      precio: parseFloat(p.Precio).toFixed(2)
+    }));
 
-    const cardsText = cardsData.map((c, i) =>
+    const cardsText = '\nPRODUCT DATA:\n' + cardsData.map((c, i) =>
       `Card ${i + 1}: "${c.nombre}" - ${c.precio} EUR/kg`
     ).join('\n');
 
-    const headerTitle = productName ? `PRECIOS ${productName.toUpperCase()}` : 'PRECIOS MEDIOS';
-    const footerText = website || '';
+    const daySeed = new Date(prices[0].Fecha).getDate() + new Date().getMonth();
+    const template = this._pickTemplate(PRICE_TEMPLATES, daySeed);
+    console.log(`[AgroImage] Plantilla precios: ${template.id}`);
 
-    const prompt = `Create a professional Instagram Story image (9:16 aspect ratio, 1080x1920px) showing 6 price cards${industry ? ` for ${industry} products` : ''}.
-
-DESIGN SPECIFICATIONS:
-- Vertical format 9:16, dark background with subtle texture
-- Header at top: "${headerTitle}" in bold modern sans-serif white text
-- Below header: "${fecha}" in smaller cyan/teal accent text
-- 6 product cards arranged in a 2-column, 3-row grid layout
-- Each card: semi-transparent dark glass card with subtle border glow
-- Product name on top of each card in white text
-- Price in large bold text in cyan/teal accent color with "€/kg" suffix
-${footerText ? `- Footer at bottom: "${footerText}" in small white text` : ''}
-- Modern, clean, professional brand aesthetic
-- Use green and teal accent colors on dark background
-- Add subtle gradient accents
-
-PRODUCT DATA FOR THE 6 CARDS:
-${cardsText}
-
-IMPORTANT: Use exactly these product names and prices. Make the image look like a professional market data dashboard story. The image MUST be exactly 9:16 aspect ratio (vertical phone screen format).`;
+    const prompt = template.build({
+      industry: industry ? ` for ${industry} products` : '',
+      headerTitle: productName ? `PRECIOS ${productName.toUpperCase()}` : 'PRECIOS MEDIOS',
+      fecha,
+      footerText: website || '',
+      cardsText
+    });
 
     const result = await geminiService.generateImage(prompt);
-
-    if (!result) {
-      throw new Error('Gemini no pudo generar la imagen de precios.');
-    }
-
+    if (!result) throw new Error('Gemini no pudo generar la imagen de precios.');
     return result;
   }
 
-  /**
-   * Genera el copy para el post de noticia.
-   * Usa el contexto del producto para hashtags y tono.
-   * @param {Object} newsItem - Noticia con Titulo, Resumen, etc.
-   * @param {string} newsUrl - URL de la noticia
-   * @returns {Promise<Object>} - { facebook: {copy, hashtags}, instagram: {copy, hashtags} }
-   */
   async generateNewsCopy(newsItem, newsUrl) {
     const meta = productContextService.getMetadata();
     const productContext = productContextService.getAsPromptSection();
@@ -94,7 +157,7 @@ Eres un community manager experto${industry !== 'el sector' ? ` del sector ${ind
 ${productContext ? productContext : ''}
 
 TITULO: ${newsItem.Titulo}
-RESUMEN: ${newsItem.Resumen.substring(0, 300)}
+RESUMEN: ${(newsItem.Resumen || '').substring(0, 300)}
 ENLACE: ${newsUrl}
 
 Genera el copy en formato JSON exacto (sin markdown):
@@ -111,6 +174,7 @@ Genera el copy en formato JSON exacto (sin markdown):
 
 IMPORTANTE:
 - Tanto el copy de Facebook como el de Instagram DEBEN incluir la URL: ${newsUrl}
+- Si la noticia es de Almería, menciónalo con naturalidad
 - Los hashtags deben ser relevantes al tema de la noticia
 - Tono profesional pero cercano${industry !== 'el sector' ? `, del sector ${industry}` : ''}`;
 
@@ -134,12 +198,6 @@ IMPORTANTE:
     }
   }
 
-  /**
-   * Genera una imagen de post para una noticia.
-   * Usa la imagen original de la noticia como referencia visual.
-   * @param {Object} newsItem - Noticia con Titulo, Resumen, UrlImagenPrincipal
-   * @returns {Promise<Object>} - { url, path } de la imagen generada
-   */
   async generateNewsPostImage(newsItem) {
     const meta = productContextService.getMetadata();
     const website = meta.website || '';
@@ -158,36 +216,19 @@ IMPORTANTE:
     const footerParts = [];
     if (website) footerParts.push(website);
     if (newsUrl) footerParts.push(newsUrl);
-    const footerLine = footerParts.length > 0 ? `\n- Bottom of image: white text "${footerParts.join('" and smaller text "')}"` : '';
+    const footerLine = footerParts.length > 0
+      ? `\n- Bottom of image: white text "${footerParts.join('" and smaller text "')}"`
+      : '';
 
-    const prompt = `Create a professional Instagram post image (1:1 square, 1080x1080px) for a news article.
-
-DESIGN SPECIFICATIONS:
-- Square format 1:1
-- Use the reference image as the main visual element, keep its context
-- Overlay a semi-transparent dark gradient at the bottom third of the image for text readability
-- Add the news headline as white bold text over the dark overlay area: "${titulo}"
-- IMPORTANT: The headline should be displayed completely. If it is long, wrap it into multiple lines using a clean, modern sans-serif font.
-- Add a small accent bar in green/teal above the headline${footerLine}
-- Clean, professional editorial/news aesthetic
-- If no reference image is provided, create a professional landscape background
-
-IMPORTANT: The text must be clearly readable. Use the reference image style as inspiration but create a new polished composition suitable for social media.`;
+    const template = this._pickTemplate(NEWS_TEMPLATES, newsItem.Id || Date.now());
+    console.log(`[AgroImage] Plantilla noticia: ${template.id}`);
+    const prompt = template.prompt(titulo, footerLine);
 
     const result = await geminiService.generateImage(prompt, referenceImages);
-
-    if (!result) {
-      throw new Error('Gemini no pudo generar la imagen de la noticia.');
-    }
-
+    if (!result) throw new Error('Gemini no pudo generar la imagen de la noticia.');
     return result;
   }
 
-  /**
-   * Descarga una imagen de noticia remota a local para usar como referencia.
-   * @param {string} imageUrl - URL completa de la imagen
-   * @returns {Promise<string|null>} - Ruta local o null si falla
-   */
   async _downloadNewsImage(imageUrl) {
     try {
       const outputDir = this._ensureOutputDir();

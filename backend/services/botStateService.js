@@ -28,9 +28,7 @@ class BotStateService {
         ],
         currentMonth: null,
         schedule: [],
-        pendingApproval: [],
-        instagramToken: null,
-        instagramAccountId: null
+        pendingApproval: []
       });
     }
   }
@@ -196,25 +194,25 @@ class BotStateService {
     return this._read().pendingApproval;
   }
 
-  setInstagramCredentials(token, accountId) {
+  /**
+   * IDs de noticias publicadas recientemente (anti-duplicado).
+   * @param {number} limit
+   */
+  getRecentNewsIds(limit = 14) {
     const state = this._read();
-    state.instagramToken = token;
-    state.instagramAccountId = accountId;
+    const ids = state.recentNewsIds || [];
+    return ids.slice(-limit);
+  }
+
+  markNewsUsed(newsId) {
+    if (newsId == null) return;
+    const state = this._read();
+    const ids = state.recentNewsIds || [];
+    const idStr = String(newsId);
+    const next = ids.filter(id => String(id) !== idStr);
+    next.push(idStr);
+    state.recentNewsIds = next.slice(-30);
     this._write(state);
-    console.log(`[BotState] Credenciales de Instagram guardadas exitosamente.`);
-  }
-
-  getInstagramCredentials() {
-    const state = this._read();
-    return {
-      token: state.instagramToken,
-      accountId: state.instagramAccountId
-    };
-  }
-
-  isInstagramConnected() {
-    const state = this._read();
-    return !!(state.instagramToken && state.instagramAccountId);
   }
 }
 

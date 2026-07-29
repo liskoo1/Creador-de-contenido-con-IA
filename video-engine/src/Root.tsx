@@ -1,14 +1,11 @@
+import React from 'react';
 import { Composition, CalculateMetadataFunction } from 'remotion';
-import { SwarmReel } from './SwarmReel';
+import { SwarmReel, type SwarmReelProps } from './SwarmReel';
 import { AudioReel } from './AudioReel';
 import type { AudioReelProps } from './AudioReel';
 
-const SCENE_FRAMES = 150;
+const SCENE_FRAMES = 240;
 const TRANSITION_FRAMES = 18;
-
-type SwarmReelProps = {
-  scenes: Array<{ url: string; title: string; subtitle: string }>;
-};
 
 /**
  * Duración total = escenas * SCENE_FRAMES - transiciones * TRANSITION_FRAMES
@@ -49,7 +46,11 @@ export const RemotionRoot: React.FC = () => {
         width={1080}
         height={1920}
         calculateMetadata={calculateMetadata}
-        defaultProps={{ scenes: [] }}
+        defaultProps={{
+          scenes: [],
+          bgmUrl: null,
+          bgmVolume: 0.25,
+        }}
       />
       <Composition
         id="AudioReel"

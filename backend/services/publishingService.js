@@ -1,50 +1,99 @@
-const fs = require('fs');
-const path = require('path');
 const instagramPublisher = require('../automation/instagramPublisher');
+const facebookPublisher = require('../automation/facebookPublisher');
 
 /**
- * Servicio de publicación.
- * Con ngrok, las imágenes se sirven directamente desde /output/ 
- * sin necesidad de copiarlas a una carpeta externa.
+ * Servicio de publicación multi-plataforma (Instagram + Facebook Page).
+ * Credenciales vía .env (tokens de acceso), sin OAuth.
  */
 class PublishingService {
   /**
-   * Publica contenido construyendo la URL pública desde SERVER_URL.
-   * @param {string|string[]} localPath Ruta (ej: /output/img.png) o URL local o array para carrusel.
-   * @param {string} type 'image', 'story', 'reel', 'carousel'
-   * @param {any} extra Caption o tipo de historia (IMAGE/VIDEO)
+   * @param {string|string[]} localPath
+   * @param {string} type 'image' | 'story' | 'reel' | 'carousel'
+   * @param {any} extra Caption IG o tipo de historia (IMAGE/VIDEO)
+   * @param {string|null} facebookCaption Caption FB (si null, reutiliza el de IG)
    */
-  async publishViaBridge(localPath, type, extra) {
+  async publishViaBridge(localPath, type, extra, facebookCaption = null) {
     const serverUrl = (process.env.SERVER_URL || 'http://localhost:3001').trim().replace(/\/+$/, '');
 
     const toPublicUrl = (p) => {
-      // Ya es una URL externa (no localhost)
       if (typeof p === 'string' && p.startsWith('http') && !p.startsWith('http://localhost')) {
         return p;
       }
-      // URL localhost: reemplazar dominio por SERVER_URL
       if (typeof p === 'string' && p.startsWith('http://localhost')) {
         const urlObj = new URL(p);
         return `${serverUrl}${urlObj.pathname}`;
       }
-      // Ruta relativa: construir URL completa
       const cleanPath = p.startsWith('/') ? p : `/${p}`;
       return `${serverUrl}${cleanPath}`;
     };
 
-    // Carrusel (array de rutas)
-    if (Array.isArray(localPath)) {
-      const imageUrls = localPath.map(toPublicUrl);
-      console.log(`[PublishingService] Publicando carrusel (${imageUrls.length} imágenes)`);
-      return await instagramPublisher.publishCarousel(imageUrls, extra);
+    const igConfigured = !!(process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_ACCOUNT_ID);
+    const fbConfigured = facebookPublisher.isConfigured();
+
+    const igCaption = type === 'story' ? null : (extra || '');
+    const storyMediaType = type === 'story' ? (extra || 'IMAGE') : 'IMAGE';
+    const fbCaption = facebookCaption != null ? facebookCaption : (igCaption || '');
+
+    const results = { instagram: null, facebook: null };
+
+    if (igConfigured) {
+      try {
+        if (Array.isArray(localPath)) {
+          const imageUrls = localPath.map(toPublicUrl);
+          console.log(`[PublishingService] IG carrusel (${imageUrls.length})`);
+          results.instagram = await instagramPublisher.publishCarousel(imageUrls, igCaption);
+        } else {
+          const publicUrl = toPublicUrl(localPath);
+          console.log(`[PublishingService] IG ${type}: ${publicUrl}`);
+          if (type === 'story') results.instagram = await instagramPublisher.publishStory(publicUrl, storyMediaType);
+          else if (type === 'reel') results.instagram = await instagramPublisher.publishReel(publicUrl, igCaption);
+          else results.instagram = await instagramPublisher.publishImage(publicUrl, igCaption);
+        }
+      } catch (e) {
+        console.error('[PublishingService] Error IG:', e.message);
+        results.instagram = { success: false, error: e.message };
+      }
+    } else {
+      console.warn('[PublishingService] Instagram no configurado en .env — omitiendo.');
+      results.instagram = { success: false, mock: true, message: 'INSTAGRAM_ACCESS_TOKEN / ACCOUNT_ID no configurados.' };
     }
 
-    const publicUrl = toPublicUrl(localPath);
-    console.log(`[PublishingService] Publicando ${type}: ${publicUrl}`);
+    if (fbConfigured) {
+      try {
+        if (Array.isArray(localPath)) {
+          const imageUrls = localPath.map(toPublicUrl);
+          console.log(`[PublishingService] FB carrusel (${imageUrls.length})`);
+          results.facebook = await facebookPublisher.publishCarousel(imageUrls, fbCaption);
+        } else {
+          const publicUrl = toPublicUrl(localPath);
+          console.log(`[PublishingService] FB ${type}: ${publicUrl}`);
+          if (type === 'story') results.facebook = await facebookPublisher.publishStory(publicUrl, storyMediaType);
+          else if (type === 'reel') results.facebook = await facebookPublisher.publishVideo(publicUrl, fbCaption);
+          else results.facebook = await facebookPublisher.publishImage(publicUrl, fbCaption);
+        }
+      } catch (e) {
+        console.error('[PublishingService] Error FB:', e.message);
+        results.facebook = { success: false, error: e.message };
+      }
+    } else {
+      console.warn('[PublishingService] Facebook no configurado en .env — omitiendo.');
+      results.facebook = { success: false, mock: true, message: 'FACEBOOK_PAGE_ID / ACCESS_TOKEN no configurados.' };
+    }
 
-    if (type === 'story') return await instagramPublisher.publishStory(publicUrl, extra);
-    if (type === 'reel') return await instagramPublisher.publishReel(publicUrl, extra);
-    return await instagramPublisher.publishImage(publicUrl, extra);
+    const igOk = results.instagram?.success === true;
+    const fbOk = results.facebook?.success === true;
+    const bothMock = !!(results.instagram?.mock && results.facebook?.mock);
+
+    return {
+      success: igOk || fbOk,
+      mock: bothMock && !igOk && !fbOk,
+      instagram: results.instagram,
+      facebook: results.facebook,
+      mediaType: type === 'reel' ? 'reel' : (Array.isArray(localPath) ? 'carousel' : type),
+      error: (!igOk && !fbOk)
+        ? (results.instagram?.error || results.facebook?.error || 'Ninguna red pudo publicar.')
+        : undefined
+    };
   }
 }
 

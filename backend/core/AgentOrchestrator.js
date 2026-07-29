@@ -5,6 +5,7 @@ const knowledgeService = require('../services/knowledgeService');
 const productContextService = require('../services/productContextService');
 const geminiService = require('../services/geminiService');
 const videoService = require('../services/videoService');
+const bgmService = require('../services/bgmService');
 const EventEmitter = require('events');
 
 const OUTPUT_DIR = path.join(__dirname, '../output');
@@ -18,11 +19,13 @@ const progressEmitter = new EventEmitter();
 class AgentOrchestrator {
   constructor() {
     this.agents = {
+      strategist: new Agent("Estratega", "marketing-ideas", "text"),
       architect: new Agent("Arquitecto", "carousel-orchestrator", "text"),
       writer: new Agent("Escritor", "content-writer", "text"),
       reviewer: new Agent("Revisor", "content-reviewer", "text"),
       designer: new Agent("Diseñador Visual", "visual-designer", "image"),
       photoOptimizer: new Agent("Optimizador Visual", "photo-prompt-optimizer", "text"),
+      videoPromptOptimizer: new Agent("Optimizador de Vídeo", "video-prompt-optimizer", "text"),
       editor: new Agent("Montador de Vídeo", "video-orchestrator", "video"),
       remotionAgent: new Agent("Especialista en Remotion", "video-orchestrator", "text"),
       researcher: new Agent("Investigador", "web-scraper", "text")
@@ -174,12 +177,44 @@ class AgentOrchestrator {
       console.warn(`[Swarm] No se pudieron obtener hashtags trending: ${err.message}`);
     }
 
+    // --- FASE 0.75: ESTRATEGIA (marketing-ideas) ---
+    let strategyContext = '';
+    if (contentType !== 'flyer') {
+      try {
+        console.log(`[Swarm] Fase 0.75: Ángulo estratégico (marketing-ideas)...`);
+        const strategyRaw = await this.agents.strategist.execute(`
+BRIEFING: ${effectiveBriefing}
+FORMATO: ${contentType}
+PRODUCTO/SECTOR: ${productName || productIndustry || 'marca'}
+
+Devuelve JSON:
+{
+  "angle": "ángulo persuasivo principal",
+  "hook": "gancho de 1 frase",
+  "audience_insight": "insight de audiencia",
+  "cta": "CTA concreta",
+  "avoid": ["clichés a evitar"]
+}
+`, { briefing: effectiveBriefing });
+
+        const angle = strategyRaw?.angle || strategyRaw?.text || '';
+        const hook = strategyRaw?.hook || '';
+        const cta = strategyRaw?.cta || '';
+        if (angle || hook) {
+          strategyContext = `\n\nESTRATEGIA (obligatoria):\nÁNGULO: ${angle}\nGANCHO: ${hook}\nCTA: ${cta}\nINSIGHT: ${strategyRaw?.audience_insight || ''}\nEVITAR: ${JSON.stringify(strategyRaw?.avoid || [])}`;
+          console.log(`[Swarm] ✅ Estrategia: ${String(angle).substring(0, 80)}...`);
+        }
+      } catch (err) {
+        console.warn(`[Swarm] Estrategia omitida: ${err.message}`);
+      }
+    }
+
     // --- FASE 1: ESCRITURA ---
     if (contentType !== 'flyer') {
       console.log(`[Swarm] Fase 1: Redacción estratégica...`);
       const cleanBrandContext = knowledgeService.getAllAsText().split("ARCHIVOS Y ACTIVOS:")[0];
       const productContextSection = productContextService.getAsPromptSection();
-      let writingPrompt = `BRIEFING: ${briefing}\nFORMATO: ${contentType}\nRATIO: ${aspectRatio}`;
+      let writingPrompt = `BRIEFING: ${briefing}\nFORMATO: ${contentType}\nRATIO: ${aspectRatio}${strategyContext}`;
       
       // Inyectar hashtags trending SIEMPRE
       if (trendingHashtagsContext) {
@@ -266,18 +301,51 @@ class AgentOrchestrator {
       const isMultiScene = (contentType === 'video' || contentType === 'carousel');
 
       if (isSingleVideo || engineMode === 'direct') {
-        // === RUTA A: UN SOLO CLIP DE 8 SEGUNDOS ===
-        console.log(`[Swarm] MODO SINGLE VIDEO: Generando 1 clip de 8 segundos con Google Veo...`);
-        const videoPrompt = `${optimizedBriefing}. Cinematic quality, photorealistic, 1024px.`;
+        // === RUTA A: UN SOLO CLIP DE 8 SEGUNDOS (Veo nativo con audio) ===
+        console.log(`[Swarm] MODO SINGLE VIDEO: Generando 1 clip de 8s con Veo (audio nativo)...`);
+        const brandChar = productContextService.getMetadata()?.presenterProfile || null;
+        const singleScene = {
+          promptVisual: typeof optimizedBriefing === 'string' ? optimizedBriefing : JSON.stringify(optimizedBriefing),
+          spokenDialog: projectState.content?.instagram?.copy
+            ? String(projectState.content.instagram.copy).split(/[.!?]/)[0].trim().split(/\s+/).slice(0, 14).join(' ')
+            : null,
+          title: null,
+          subtitle: null,
+          mood: 'inspiring'
+        };
+        let singleLock = null;
+        if (brandChar) {
+          singleLock = await this._generateCharacterLock(brandChar, aspectRatio);
+          projectState.characterLock = singleLock;
+        }
+        const singleDirective = {
+          photographyStyle: 'cinematic photorealistic, 35mm lens, shallow depth of field',
+          lightingSetup: 'natural soft light',
+          colorPalette: 'warm natural tones'
+        };
+        const { prompt: veoPrompt, enriched, wordCount } = await this._enrichVideoScenePrompt(
+          singleScene, brandChar, singleDirective, { role: singleScene.spokenDialog ? 'talking' : 'broll', aspectRatio }
+        );
+        console.log(`[Swarm] Veo direct prompt: enriched=${enriched} words=${wordCount}`);
         try {
-          const videoData = await this.agents.editor.execute(videoPrompt, { 
-            briefing: optimizedBriefing,
+          const videoData = await this.agents.editor.execute(veoPrompt, {
+            briefing: veoPrompt,
             is_pure_video_request: true,
-            aspectRatio: aspectRatio
+            aspectRatio: aspectRatio,
+            referenceImagePath: singleLock || null,
+            personGeneration: 'allow_adult',
+            videoTask: singleLock ? 'reference_to_video' : 'text_to_video'
           });
           if (videoData && videoData.url) {
-            projectState.video = { url: videoData.url };
+            // Direct: publicar el MP4 de Veo sin Remotion (preserva audio/lip-sync)
+            projectState.video = {
+              url: videoData.url,
+              hasAudio: videoData.hasAudio,
+              duration: videoData.duration,
+              engine: 'veo-direct'
+            };
             projectState.visuals.push(videoData.url);
+            console.log(`[Swarm] ✅ Clip directo Veo listo (hasAudio=${videoData.hasAudio}).`);
           }
         } catch (err) { console.error(`[Swarm] Error Veo:`, err); }
 
@@ -287,11 +355,9 @@ class AgentOrchestrator {
         emitProgress('planning', 'Planificando guion del Reel...');
         const scenes = [];
 
-        // 1. Generar directiva visual para coherencia
         const visualDirective = await this._generateVisualDirective(effectiveBriefing, projectState.content);
         console.log(`[Remotion] 🎨 Directiva visual: ${JSON.stringify(visualDirective)}`);
 
-        // 2. Construir contexto de investigación
         let researchContext = '';
         if (projectState.researchData) {
           const rd = projectState.researchData;
@@ -305,27 +371,37 @@ class AgentOrchestrator {
           `;
         }
 
-        // 3. Planificar escenas con el video-orchestrator mejorado
+        const brandPresenter = productContextService.getMetadata()?.presenterProfile || null;
         const remotionPlan = await this.agents.remotionAgent.execute(`
           CONTENIDO GENERADO: ${JSON.stringify(projectState.content)}
           BRIEFING: ${effectiveBriefing}
           ${researchContext}
           ACTIVOS DISPONIBLES: ${JSON.stringify(brandAssets.map(a => a.description))}
           DIRECTIVA VISUAL OBLIGATORIA: ${JSON.stringify(visualDirective)}
-          RESTRICCIÓN: Cada clip = EXACTAMENTE 8 SEGUNDOS.
+          ${brandPresenter ? `PERSONAJE DE MARCA PREFERIDO: ${brandPresenter}` : ''}
+
+          Eres el PLANIFICADOR (pasada 1). NO escribas el prompt final de Veo.
+          promptVisual = intención corta (1-3 frases EN): sujeto + acción + lugar concreto.
+          Un optimizador posterior expandirá cada escena a 120-180 palabras.
+
+          RESTRICCIÓN: Cada clip Veo = EXACTAMENTE 8 SEGUNDOS.
+          AUDIO NATIVO VEO: spokenDialog en español castellano (máx 14 palabras) o null.
+          Escena 1 = GANCHO (diálogo o impacto visual). Producto/marca: ≥1-2 spokenDialog.
+          Títulos concretos (NUNCA "Descubre Más", "Contenido de calidad").
           
           Devuelve SOLO el JSON sin markdown:
           {
-            "characterProfile": "Short character profile description in English (if any people are present, e.g. A modern organic farmer in his 30s, clean shaved, wearing a clean navy polo shirt, professional and confident look). If no characters are involved, use null.",
+            "characterProfile": "Detailed English character lock OR null",
+            "mood": "epic|calm|urgent|playful|dark|inspiring|farm|news",
             "visualDirective": { "colorPalette": "...", "photographyStyle": "...", "lightingSetup": "..." },
             "scenes": [
               { 
-                "promptVisual": "Visual description in English...", 
-                "spokenDialog": "Spoken dialogue in Spanish by the character (if the character speaks in this scene, otherwise null)...",
-                "voiceOver": "Background voice-over text in Spanish (if any, otherwise null)...",
-                "title": "...", 
-                "subtitle": "...", 
-                "mood": "...", 
+                "promptVisual": "Short EN intention: subject + action + specific place", 
+                "spokenDialog": "Short Castilian Spanish line OR null",
+                "voiceOver": null,
+                "title": "SHORT TITLE", 
+                "subtitle": "short subtitle", 
+                "mood": "inspiring", 
                 "animationStyle": "cinematic", 
                 "requiredAsset": null 
               }
@@ -333,87 +409,192 @@ class AgentOrchestrator {
           }
         `, { briefing: effectiveBriefing });
 
-        // 4. Validar escenas
-        const plannedScenes = this._parseAndValidateScenes(remotionPlan, optimizedBriefing);
+        const planCheck = this._validateRemotionPlan(remotionPlan);
+        if (planCheck.warnings.length) {
+          console.warn(`[Remotion] Checklist plan: ${planCheck.warnings.join(' | ')}`);
+        }
+
+        let plannedScenes = this._parseAndValidateScenes(remotionPlan, optimizedBriefing);
+        const directive = remotionPlan?.visualDirective || visualDirective;
+        let characterProfile = remotionPlan?.characterProfile || brandPresenter || null;
+        if (characterProfile === 'null') characterProfile = null;
+
+        // Character lock: 1 imagen ancla si hay personaje
+        let characterLockPath = null;
+        const needsPerson = plannedScenes.some(s => s.spokenDialog) || !!characterProfile;
+        if (needsPerson && characterProfile) {
+          emitProgress('planning', 'Generando character lock...');
+          characterLockPath = await this._generateCharacterLock(characterProfile, aspectRatio);
+          projectState.characterLock = characterLockPath;
+        }
+
         const totalScenes = plannedScenes.length;
-        console.log(`[Remotion] 🎬 ${totalScenes} escenas validadas.`);
+        console.log(`[Remotion] 🎬 ${totalScenes} escenas. Character lock: ${characterLockPath || 'none'}`);
         emitProgress('generating', `Generando ${totalScenes} escenas...`, 0, totalScenes);
 
-        // 5. Optimizar TODOS los prompts primero (batch)
-        const optimizedPrompts = await Promise.all(
-          plannedScenes.map(async (sp, i) => {
-            const refs = this._filterReferences(sp.promptVisual, sp.requiredAsset, allReferences);
-            const directive = remotionPlan?.visualDirective || visualDirective;
-            
-            // Incluir el characterProfile en la optimización del prompt visual
-            const characterInfo = remotionPlan?.characterProfile ? `Subject is ${remotionPlan.characterProfile}. ` : '';
-            const enriched = `${characterInfo}${sp.promptVisual}. ESTILO VISUAL OBLIGATORIO: ${directive.photographyStyle || 'hyper-realistic'}. ILUMINACIÓN: ${directive.lightingSetup || 'cinematic'}. PALETA: ${directive.colorPalette || 'warm'}.`;
-            
-            let optimized = await this._optimizeScenePrompt(enriched, refs, i + 1, totalScenes, aspectRatio);
-            
-            // Inyectar la instrucción de diálogo hablado para el lip-sync después de optimizar
-            if (sp.spokenDialog) {
-              optimized = `${optimized}. The character in the video is looking directly at the camera and speaking in clear, native Castilian Spanish from Spain (Español de España) with a natural and professional accent. The character's exact spoken dialogue is: "${sp.spokenDialog}". Sychronize lips and voice generation to this Spanish speech.`;
-            }
-            return optimized;
-          })
-        );
+        // Doble pasada: enriquecer prompts Veo (talking secuencial; b-roll en paralelo)
+        console.log(`[Remotion] 🔬 Enrichment de ${totalScenes} prompts Veo...`);
+        emitProgress('generating', `Optimizando prompts de vídeo...`, 0, totalScenes);
+        const veoPrompts = new Array(totalScenes).fill(null);
 
-        // 6. Generar escenas EN PARALELO (batches de 3)
-        const BATCH_SIZE = 3;
-        for (let batch = 0; batch < Math.ceil(totalScenes / BATCH_SIZE); batch++) {
-          const start = batch * BATCH_SIZE;
-          const end = Math.min(start + BATCH_SIZE, totalScenes);
-          const batchPromises = [];
+        const talkingForEnrich = [];
+        const brollForEnrich = [];
+        plannedScenes.forEach((sp, i) => {
+          if (sp.spokenDialog) talkingForEnrich.push(i);
+          else brollForEnrich.push(i);
+        });
 
-          for (let i = start; i < end; i++) {
-            const prompt = optimizedPrompts[i];
-            if (mediaType === 'video') {
-              console.log(`[Remotion] 🎬 Clip Veo ${i+1}/${totalScenes} (batch ${batch+1})...`);
-              batchPromises.push(
-                this.agents.editor.execute(prompt, { briefing: prompt, is_pure_video_request: true, aspectRatio })
-                  .then(d => ({ index: i, data: d }))
-                  .catch(e => { console.error(`[Remotion] Error escena ${i+1}:`, e.message); return { index: i, data: null }; })
-              );
-            } else {
-              console.log(`[Remotion] 🖼️ Imagen ${i+1}/${totalScenes} (batch ${batch+1})...`);
-              const refs = this._filterReferences(plannedScenes[i].promptVisual, plannedScenes[i].requiredAsset, allReferences);
-              batchPromises.push(
-                this.executeVisualWithReview(this.agents.designer, this.agents.reviewer, prompt, { briefing: prompt, imageModel, aspectRatio }, refs)
-                  .then(d => ({ index: i, data: d }))
-                  .catch(e => { console.error(`[Remotion] Error escena ${i+1}:`, e.message); return { index: i, data: null }; })
-              );
-            }
+        for (const i of talkingForEnrich) {
+          const sp = plannedScenes[i];
+          const { prompt, enriched, wordCount } = await this._enrichVideoScenePrompt(
+            sp, characterProfile, directive, { role: 'talking', aspectRatio }
+          );
+          veoPrompts[i] = prompt;
+          console.log(`[Remotion] Prompt escena ${i + 1}: enriched=${enriched} words=${wordCount} role=talking`);
+        }
+
+        await Promise.all(brollForEnrich.map(async (i) => {
+          const sp = plannedScenes[i];
+          const { prompt, enriched, wordCount } = await this._enrichVideoScenePrompt(
+            sp, characterProfile, directive, { role: 'broll', aspectRatio }
+          );
+          veoPrompts[i] = prompt;
+          console.log(`[Remotion] Prompt escena ${i + 1}: enriched=${enriched} words=${wordCount} role=broll`);
+        }));
+
+        // Generación: escenas con persona SECUENCIALES; B-roll en paralelo
+        const resultsByIndex = new Array(totalScenes).fill(null);
+
+        // Talking (con diálogo) → secuencial + reference image
+        // B-roll → paralelo (el CHARACTER LOCK textual sigue en el prompt)
+        const talkingIndexes = [];
+        const brollIndexes = [];
+        plannedScenes.forEach((sp, i) => {
+          if (sp.spokenDialog) talkingIndexes.push(i);
+          else brollIndexes.push(i);
+        });
+
+        // Talking / character scenes — sequential for consistency
+        for (const i of talkingIndexes) {
+          const sp = plannedScenes[i];
+          console.log(`[Remotion] 🎬 Clip Veo talking ${i + 1}/${totalScenes}...`);
+          try {
+            const data = await this.agents.editor.execute(veoPrompts[i], {
+              briefing: veoPrompts[i],
+              is_pure_video_request: true,
+              aspectRatio,
+              referenceImagePath: characterLockPath || null,
+              personGeneration: 'allow_adult',
+              videoTask: characterLockPath ? 'reference_to_video' : 'text_to_video'
+            });
+            resultsByIndex[i] = data;
+            console.log(`[Remotion] Telemetría escena ${i + 1}: hasAudio=${data?.hasAudio} dialog=${!!sp.spokenDialog} ref=${!!characterLockPath}`);
+          } catch (e) {
+            console.error(`[Remotion] Error escena ${i + 1}:`, e.message);
           }
+          emitProgress('generating', `Escena ${i + 1}/${totalScenes}`, i + 1, totalScenes);
+        }
 
-          const batchResults = await Promise.allSettled(batchPromises);
-          for (const result of batchResults) {
-            const { index, data } = result.status === 'fulfilled' ? result.value : { index: -1, data: null };
-            if (index === -1 || !data) continue;
-            const backgroundUrl = data.url;
-            if (backgroundUrl) {
-              emitProgress('generating', `Escena ${index+1}/${totalScenes} completada`, index + 1, totalScenes);
-              projectState.visuals.push(backgroundUrl);
-              const sp = plannedScenes[index];
-              scenes.push({
-                url: backgroundUrl.startsWith('http') ? backgroundUrl : `http://localhost:3001${backgroundUrl.startsWith('/') ? '' : '/'}${backgroundUrl}`,
-                title: sp.title,
-                subtitle: sp.subtitle
-              });
+        // B-roll — parallel batches of 3
+        const BATCH_SIZE = 3;
+        for (let b = 0; b < Math.ceil(brollIndexes.length / BATCH_SIZE); b++) {
+          const slice = brollIndexes.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
+          const batchPromises = slice.map(async (i) => {
+            if (mediaType === 'video') {
+              console.log(`[Remotion] 🎬 Clip Veo b-roll ${i + 1}/${totalScenes}...`);
+              try {
+                const data = await this.agents.editor.execute(veoPrompts[i], {
+                  briefing: veoPrompts[i],
+                  is_pure_video_request: true,
+                  aspectRatio,
+                  referenceImagePath: characterLockPath || null,
+                  personGeneration: characterLockPath ? 'allow_adult' : null,
+                  videoTask: characterLockPath ? 'reference_to_video' : 'text_to_video'
+                });
+                console.log(`[Remotion] Telemetría escena ${i + 1}: hasAudio=${data?.hasAudio} dialog=false ref=${!!characterLockPath}`);
+                return { index: i, data };
+              } catch (e) {
+                console.error(`[Remotion] Error escena ${i + 1}:`, e.message);
+                return { index: i, data: null };
+              }
             }
+            const refs = this._filterReferences(plannedScenes[i].promptVisual, plannedScenes[i].requiredAsset, allReferences);
+            const imgPrompt = await this._optimizeScenePrompt(
+              plannedScenes[i].promptVisual,
+              refs, i + 1, totalScenes, aspectRatio,
+              { visualDirective: directive, characterProfile }
+            );
+            try {
+              const data = await this.executeVisualWithReview(
+                this.agents.designer, this.agents.reviewer, imgPrompt,
+                { briefing: imgPrompt, imageModel, aspectRatio }, refs
+              );
+              return { index: i, data };
+            } catch (e) {
+              return { index: i, data: null };
+            }
+          });
+
+          const batchResults = await Promise.all(batchPromises);
+          for (const { index, data } of batchResults) {
+            resultsByIndex[index] = data;
+            emitProgress('generating', `Escena ${index + 1}/${totalScenes}`, index + 1, totalScenes);
           }
         }
 
-        // 7. Renderizar con Remotion y limpiar archivos intermedios
+        for (let i = 0; i < totalScenes; i++) {
+          const data = resultsByIndex[i];
+          if (!data?.url) continue;
+          const backgroundUrl = data.url;
+          projectState.visuals.push(backgroundUrl);
+          const sp = plannedScenes[i];
+          const hasDialog = !!sp.spokenDialog;
+          scenes.push({
+            url: backgroundUrl.startsWith('http') ? backgroundUrl : `http://localhost:3001${backgroundUrl.startsWith('/') ? '' : '/'}${backgroundUrl}`,
+            title: hasDialog ? this._shortTitle(sp.title, 6) : sp.title,
+            subtitle: hasDialog ? this._shortTitle(sp.subtitle, 8) : sp.subtitle,
+            animationStyle: hasDialog ? 'minimal-bar' : (sp.animationStyle || null),
+            mood: sp.mood || null,
+            spokenDialog: sp.spokenDialog || null,
+            voiceOver: sp.voiceOver || null,
+            hasNativeAudio: data.hasAudio === true || hasDialog,
+            role: hasDialog ? 'talking' : 'broll'
+          });
+        }
+
+        // Ordenar por índice original (talking/broll pueden completar desordenados en visuals, pero scenes se pushean en orden)
+        // scenes already pushed in order 0..n
+
         if (scenes.length > 0) {
-          emitProgress('rendering', 'Montando Reel con Remotion...');
+          emitProgress('rendering', 'Montando Reel con Remotion (audio nativo)...');
           const intermediateFiles = scenes.map(s => s.url);
           try {
-            projectState.video = await videoService.renderSwarmReel(scenes);
-            // Limpiar imágenes/clips intermedios tras render exitoso
+            const hasAnyDialog = scenes.some(s => s.role === 'talking' || s.hasNativeAudio);
+            const planMood = remotionPlan?.mood || null;
+            const mood = bgmService.pickMoodFromScenes(scenes, planMood);
+            const track = await bgmService.ensureTrack(mood);
+            const localServer = `http://localhost:${process.env.PORT || 3001}`;
+            const bgmUrl = track.absolutePath
+              ? bgmService.toPublicUrl(track.absolutePath, localServer)
+              : null;
+            // Duck BGM fuerte si hay diálogo nativo
+            const bgmVolume = bgmService.resolveVolume({ hasNativeDialog: hasAnyDialog });
+
+            if (bgmUrl) {
+              console.log(`[Remotion] 🎵 BGM mood=${track.mood} vol=${bgmVolume} (ducked=${hasAnyDialog})`);
+            }
+
+            projectState.video = await videoService.renderSwarmReel(scenes, {
+              bgmUrl,
+              bgmVolume
+            });
             this._cleanupFiles(intermediateFiles);
-            // En el estado final solo guardamos el vídeo, no los intermedios
             projectState.visuals = projectState.video ? [projectState.video.url] : [];
+            if (projectState.video) {
+              projectState.video.bgm = track.fileName || null;
+              projectState.video.mood = track.mood;
+              projectState.video.hasNativeDialog = hasAnyDialog;
+            }
           } catch (err) { console.error(`[Swarm] Error Remotion:`, err); }
         }
       }
@@ -440,10 +621,12 @@ class AgentOrchestrator {
          ${carouselResearchCtx}
          ACTIVOS DISPONIBLES: ${JSON.stringify(brandAssets.map(a => a.description))}
          
+         promptVisual = intención corta (sujeto + acción + lugar). Un optimizador expandirá a prompt fotográfico detallado.
+         
          Devuelve JSON:
          {
            "slides": [
-             { "promptVisual": "descripción visual de la slide", "text": "texto informativo de la slide", "requiredAsset": "keyword del activo" }
+             { "promptVisual": "short visual intention in English", "text": "texto informativo de la slide", "requiredAsset": "keyword del activo" }
            ]
          }
        `, { briefing: effectiveBriefing });
@@ -460,14 +643,19 @@ class AgentOrchestrator {
          });
        }
 
+       const carouselDirective = await this._generateVisualDirective(effectiveBriefing, projectState.content);
+       const carouselCharacter = productContextService.getMetadata()?.presenterProfile || null;
+
        for (let i = 0; i < slides.length; i++) { 
          const slidePlan = slides[i];
          const slideRefs = this._filterReferences(slidePlan.promptVisual, slidePlan.requiredAsset, allReferences);
          const slideText = (slidePlan.text || '').trim().toUpperCase();
          console.log(`[Swarm] Generando slide ${i+1}/${slides.length}: "${slideText}"...`);
          
-         // Optimizar el prompt visual de cada slide
-         const optimizedSlidePrompt = await this._optimizeScenePrompt(slidePlan.promptVisual, slideRefs, i + 1, slides.length, aspectRatio);
+         const optimizedSlidePrompt = await this._optimizeScenePrompt(
+           slidePlan.promptVisual, slideRefs, i + 1, slides.length, aspectRatio,
+           { visualDirective: carouselDirective, characterProfile: carouselCharacter }
+         );
          
          // Añadir instrucción de texto narrativo directamente al prompt de Gemini
          const promptWithText = slideText
@@ -479,10 +667,17 @@ class AgentOrchestrator {
        }
     }
     else {
-       // Para imagen única, enviamos todo el pool relevante pero priorizando logos si se menciona la marca
+       // Imagen única: segunda pasada photo-optimizer con directiva + presentador
        const imgRefs = this._filterReferences(optimizedBriefing, null, allReferences);
-       const imagePrompt = `IMAGEN TÁCTICA: ${optimizedBriefing}. FORMATO: ${aspectRatio}.`;
-       const imgData = await this.executeVisualWithReview(this.agents.designer, this.agents.reviewer, imagePrompt, { briefing: optimizedBriefing, imageModel, aspectRatio }, imgRefs);
+       const singleDirective = await this._generateVisualDirective(effectiveBriefing, projectState.content);
+       const singleCharacter = productContextService.getMetadata()?.presenterProfile || null;
+       const enrichedImagePrompt = await this._optimizeScenePrompt(
+         typeof optimizedBriefing === 'string' ? optimizedBriefing : JSON.stringify(optimizedBriefing),
+         imgRefs, 1, 1, aspectRatio,
+         { visualDirective: singleDirective, characterProfile: singleCharacter }
+       );
+       const imagePrompt = `IMAGEN TÁCTICA: ${enrichedImagePrompt}. FORMATO: ${aspectRatio}.`;
+       const imgData = await this.executeVisualWithReview(this.agents.designer, this.agents.reviewer, imagePrompt, { briefing: enrichedImagePrompt, imageModel, aspectRatio }, imgRefs);
        if (imgData) projectState.visuals.push(imgData.url);
     }
 
@@ -544,7 +739,8 @@ class AgentOrchestrator {
         brandAssets.slice(0, 2),
         i + 1,
         audioData.scenes.length,
-        aspectRatio
+        aspectRatio,
+        { characterProfile: productContextService.getMetadata()?.presenterProfile || null }
       );
 
       // Generar imagen
@@ -625,42 +821,46 @@ class AgentOrchestrator {
     if (!text || typeof text !== 'string') return text;
     
     let clean = text
-      // Eliminar bloques de código markdown
       .replace(/```[\s\S]*?```/g, '')
-      // Eliminar cabeceras markdown y negritas con etiquetas como "**Optimized Prompt:**"
       .replace(/\*\*[^*]+\*\*:?\s*/g, '')
-      // Eliminar líneas que empiezan por # (cabeceras)
       .replace(/^#+\s.*/gm, '')
-      // Eliminar notas entre paréntesis con asteriscos *(Note: ...)*
       .replace(/\*\([^)]*\)\*\.?/g, '')
-      // Eliminar el bloque de cita de blockquote (>)
       .replace(/^>\s*/gm, '')
-      // Eliminar parámetros de Midjourney/Stable Diffusion
       .replace(/--\w[\w-]*(\s+\S+)?/g, '')
-      // Eliminar líneas que contengan "💡" o instrucciones para el usuario
       .replace(/^.*💡.*$/gm, '')
       .replace(/^.*\[INSERT_/gm, '')
-      // Eliminar asteriscos sueltos de énfasis
       .replace(/\*+/g, '')
-      // Colapsar múltiples líneas en blanco
       .replace(/\n{3,}/g, '\n\n')
       .trim();
 
-    // Si hay varias líneas, coger solo el primer párrafo de contenido sustancial
-    const lines = clean.split('\n').map(l => l.trim()).filter(l => l.length > 20);
-    return lines.length > 0 ? lines[0] : clean;
+    // Conservar el prompt completo (antes se truncaba a la 1ª línea y perdía detalle)
+    if (clean.length > 1200) {
+      clean = clean.slice(0, 1200).trim();
+      const lastStop = Math.max(clean.lastIndexOf('.'), clean.lastIndexOf(','));
+      if (lastStop > 800) clean = clean.slice(0, lastStop + 1);
+    }
+    return clean;
   }
 
   /**
-   * Optimiza el prompt visual de una escena individual (Remotion, carrusel, vídeo).
-   * Pasa el prompt por el photo-prompt-optimizer y construye instrucciones sobre las referencias.
+   * Optimiza el prompt visual de una escena individual (imagen: Remotion-foto, carrusel, single).
+   * Pasa el prompt por el photo-prompt-optimizer con directiva y character lock.
    */
-  async _optimizeScenePrompt(rawPrompt, sceneRefs, sceneNumber, totalScenes, aspectRatio) {
+  async _optimizeScenePrompt(rawPrompt, sceneRefs, sceneNumber, totalScenes, aspectRatio, extra = {}) {
     try {
-      // Construir input para el optimizer incluyendo info de referencias
+      const directive = extra.visualDirective || null;
+      const characterProfile = extra.characterProfile || null;
+
       let optimizerInput = `ESCENA ${sceneNumber}/${totalScenes}. RATIO: ${aspectRatio}.\nDESCRIPCIÓN: ${rawPrompt}`;
-      
-      // Si hay referencias adjuntas, describir QUÉ son y PARA QUÉ usarlas
+      optimizerInput += `\nOUTPUT: One dense English photography paragraph, 120-160 words, 8-layer enrichment. No markdown.`;
+
+      if (directive) {
+        optimizerInput += `\nVISUAL DIRECTIVE (MUST KEEP — do not change style):\n${JSON.stringify(directive)}`;
+      }
+      if (characterProfile) {
+        optimizerInput += `\nCHARACTER LOCK / subjectConsistency (MUST KEEP identical):\n${characterProfile}`;
+      }
+
       if (sceneRefs && sceneRefs.length > 0) {
         const refDescriptions = sceneRefs.map((ref, idx) => {
           const mode = ref.mode || 'reference';
@@ -672,23 +872,33 @@ class AgentOrchestrator {
         optimizerInput += `\n\nIMÁGENES DE REFERENCIA ADJUNTAS:\n${refDescriptions}\nIMPORTANTE: Integra las referencias en tu prompt.`;
       }
 
-      console.log(`[Optimizer] Optimizando prompt escena ${sceneNumber}/${totalScenes}...`);
+      console.log(`[Optimizer] Optimizando prompt imagen escena ${sceneNumber}/${totalScenes}...`);
       const optResult = await this.agents.photoOptimizer.execute(optimizerInput);
-      const raw = optResult?.text || optResult;
-      const optimized = this._sanitizePrompt(typeof raw === 'string' ? raw : JSON.stringify(raw));
-      
-      // Validar que el resultado es un string útil
-      if (optimized && optimized.length > 30) {
-        console.log(`[Optimizer] Prompt final escena ${sceneNumber}: "${optimized.substring(0, 100)}..."`);
+      const raw = this._extractPromptText(optResult);
+      // No truncar tan agresivo: prompts ricos necesitan espacio
+      let optimized = raw
+        .replace(/```/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (optimized.length > 2500) {
+        optimized = optimized.slice(0, 2500).trim();
+      }
+
+      const words = this._wordCount(optimized);
+      if (optimized && words >= 60) {
+        console.log(`[Optimizer] Prompt imagen escena ${sceneNumber}: words=${words} "${optimized.substring(0, 100)}..."`);
         return optimized;
       }
-      
-      // Fallback: si el optimizer devuelve algo inútil, enriquecer manualmente
-      console.log(`[Optimizer] Resultado insuficiente, usando prompt enriquecido manual.`);
-      return `${rawPrompt}. Hyper-realistic, cinematic lighting, professional photography, ${aspectRatio} format, 4K detail, dramatic composition.`;
+
+      console.log(`[Optimizer] Resultado insuficiente (words=${words}), usando prompt enriquecido manual.`);
+      const lock = characterProfile ? ` CHARACTER LOCK: ${characterProfile}.` : '';
+      const dir = directive
+        ? ` Style: ${directive.photographyStyle || ''}. Light: ${directive.lightingSetup || ''}. Palette: ${directive.colorPalette || ''}.`
+        : '';
+      return `${rawPrompt}.${lock}${dir} Hyper-realistic photograph, cinematic lighting, professional photography, ${aspectRatio} format, 4K detail, natural anatomy, no text in image, no watermarks.`;
     } catch (err) {
       console.error(`[Optimizer] Error optimizando escena ${sceneNumber}:`, err.message);
-      return `${rawPrompt}. Hyper-realistic, cinematic lighting, professional photography, ${aspectRatio} format, 4K detail.`;
+      return `${rawPrompt}. Hyper-realistic, cinematic lighting, professional photography, ${aspectRatio} format, 4K detail, no text in image.`;
     }
   }
 
@@ -717,6 +927,168 @@ class AgentOrchestrator {
   }
 
   /**
+   * Extrae texto de prompt desde respuesta de agente (string | {text} | JSON).
+   */
+  _extractPromptText(result) {
+    if (!result) return '';
+    if (typeof result === 'string') return result.trim();
+    if (typeof result.text === 'string') return result.text.trim();
+    if (typeof result.prompt === 'string') return result.prompt.trim();
+    try {
+      return JSON.stringify(result);
+    } catch {
+      return String(result);
+    }
+  }
+
+  _wordCount(text) {
+    return String(text || '').trim().split(/\s+/).filter(Boolean).length;
+  }
+
+  /**
+   * Fallback estructurado por capas para Veo (si falla el optimizer).
+   */
+  _buildVeoPrompt(scene, characterProfile, visualDirective = {}) {
+    const dialog = scene.spokenDialog
+      ? String(scene.spokenDialog).trim().split(/\s+/).slice(0, 14).join(' ')
+      : null;
+
+    const style = visualDirective.photographyStyle || 'cinematic photorealistic, 35mm lens, shallow depth of field';
+    const light = visualDirective.lightingSetup || 'natural soft cinematic lighting';
+    const palette = visualDirective.colorPalette || 'warm natural tones';
+    const visual = scene.promptVisual || 'A professional vertical social video scene in a modern greenhouse';
+
+    const subject = characterProfile
+      ? `CHARACTER LOCK (must stay identical — do not change face, hair, age, or clothing): ${characterProfile}.`
+      : 'Primary subject is the scene focus with clear photoreal detail.';
+
+    const action = dialog
+      ? 'Single continuous unbroken 8-second medium close-up shot (no scene cuts): the same character looks directly at the camera and speaks naturally with matching lip sync, subtle natural gestures.'
+      : 'Single continuous unbroken 8-second shot (no scene cuts) with clear camera motion (slow push-in or gentle lateral glide), natural environmental motion.';
+
+    const camera = 'Camera: vertical 9:16 Instagram Reels framing, 35mm cinematic feel, eye-level, rule of thirds, shallow depth of field. One continuous take only.';
+
+    const audio = dialog
+      ? `Audio: one speaker only, native Castilian Spanish (Español de España), professional natural voice, exact spoken dialogue with matching lip sync: "${dialog}". Soft ambient bed matching the location under the voice.`
+      : 'Audio: rich ambient soundscape matching the location. No invented dialogue.';
+
+    const finish = 'Photorealistic live-action, natural motion, high detail. No text overlays, no watermarks, no floating logos, no holograms, no drones as clichés, correct human anatomy, single coherent scene.';
+
+    return `${subject} Scene intention: ${visual}. ${action} Environment and style: ${style}. Lighting: ${light}. Color palette: ${palette}. ${camera} ${audio} ${finish}`
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Doble pasada: expande intención de escena → prompt Veo 120–180 palabras.
+   * Si falla, usa _buildVeoPrompt.
+   */
+  async _enrichVideoScenePrompt(scene, characterProfile, visualDirective = {}, options = {}) {
+    const role = options.role || (scene.spokenDialog ? 'talking' : 'broll');
+    const aspectRatio = options.aspectRatio || '9:16';
+    const fallback = this._buildVeoPrompt(scene, characterProfile, visualDirective);
+
+    const dialogLiteral = scene.spokenDialog
+      ? String(scene.spokenDialog).trim().split(/\s+/).slice(0, 14).join(' ')
+      : null;
+
+    try {
+      const input = `
+Expand this Veo 3.1 scene brief into ONE dense English cinematic paragraph (120-180 words).
+DURATION: about 8 seconds (must fit 3-10s Omni Flash range). ASPECT: ${aspectRatio}. ROLE: ${role}.
+IMPORTANT: Omni Flash defaults to multi-shot — you MUST specify a single continuous unbroken shot with no scene cuts.
+
+promptVisual (intention only): ${scene.promptVisual || ''}
+spokenDialog (INSERT VERBATIM IN QUOTES — do not rewrite; null if none): ${dialogLiteral === null ? 'null' : JSON.stringify(dialogLiteral)}
+characterProfile: ${characterProfile || 'null'}
+visualDirective: ${JSON.stringify(visualDirective)}
+
+RULES: Keep spokenDialog exact if present. Respect CHARACTER LOCK and visualDirective. No markdown. Output ONLY the prompt paragraph.
+`.trim();
+
+      const result = await this.agents.videoPromptOptimizer.execute(input, {
+        briefing: scene.promptVisual,
+        spokenDialog: dialogLiteral
+      });
+
+      let enriched = this._extractPromptText(result);
+      enriched = enriched
+        .replace(/^```[\s\S]*?\n/, '')
+        .replace(/```$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Si el modelo omitió el diálogo, forzar inserción literal
+      if (dialogLiteral && !enriched.includes(dialogLiteral)) {
+        enriched += ` Exact spoken dialogue in native Castilian Spanish with matching lip sync: "${dialogLiteral}". One speaker only.`;
+      }
+
+      const words = this._wordCount(enriched);
+      if (words >= 100 && enriched.length > 200) {
+        console.log(`[VeoOptimizer] enriched=${true} words=${words} role=${role} dialog=${!!dialogLiteral}`);
+        return { prompt: enriched, enriched: true, wordCount: words };
+      }
+
+      console.warn(`[VeoOptimizer] Resultado corto (words=${words}), usando fallback capas.`);
+      return { prompt: fallback, enriched: false, wordCount: this._wordCount(fallback) };
+    } catch (e) {
+      console.warn(`[VeoOptimizer] Falló (${e.message}), usando fallback capas.`);
+      return { prompt: fallback, enriched: false, wordCount: this._wordCount(fallback) };
+    }
+  }
+
+  _shortTitle(text, maxWords = 6) {
+    if (!text || typeof text !== 'string') return '';
+    return text.trim().split(/\s+/).slice(0, maxWords).join(' ');
+  }
+
+  /**
+   * Genera imagen ancla del personaje para consistencia entre clips Veo.
+   */
+  async _generateCharacterLock(characterProfile, aspectRatio = '9:16') {
+    try {
+      const prompt = `Photorealistic portrait reference sheet of: ${characterProfile}. Neutral background, soft studio light, looking at camera, shoulders-up, consistent identity reference photo, no text, no logos.`;
+      const img = await geminiService.generateImage(prompt, [], aspectRatio === '9:16' ? '9:16' : '1:1');
+      if (img?.path && fs.existsSync(img.path)) {
+        console.log(`[Remotion] 🔒 Character lock guardado: ${img.path}`);
+        return img.path;
+      }
+      if (img?.url) {
+        const local = path.join(OUTPUT_DIR, path.basename(img.url));
+        if (fs.existsSync(local)) return local;
+      }
+    } catch (e) {
+      console.warn(`[Remotion] Character lock falló: ${e.message}`);
+    }
+    return null;
+  }
+
+  /**
+   * Checklist barato del plan Remotion antes de gastar en Veo.
+   */
+  _validateRemotionPlan(plan) {
+    const warnings = [];
+    const scenes = plan?.scenes || [];
+    if (scenes.length < 3) warnings.push('Menos de 3 escenas');
+    if (scenes.length > 0) {
+      const t0 = (scenes[0].title || '').toLowerCase();
+      if (/descubre|contenido|calidad|swarm/.test(t0)) warnings.push('Título genérico en escena 1');
+    }
+    const dialogs = scenes.filter(s => s.spokenDialog && String(s.spokenDialog).trim().length > 0);
+    if (plan?.characterProfile && dialogs.length === 0) {
+      warnings.push('Hay personaje pero ninguna escena con spokenDialog');
+    }
+    for (const d of dialogs) {
+      const words = String(d.spokenDialog).trim().split(/\s+/).length;
+      if (words > 16) warnings.push(`Diálogo demasiado largo (${words} palabras)`);
+    }
+    if (plan?.characterProfile && /straw|dirty|ragged|peasant/i.test(plan.characterProfile)) {
+      warnings.push('characterProfile con estereotipo no deseado');
+    }
+    return { ok: warnings.length === 0, warnings };
+  }
+
+  /**
    * Valida y normaliza el array de escenas devuelto por el agente planificador.
    */
   _parseAndValidateScenes(plan, fallbackPrompt) {
@@ -724,25 +1096,36 @@ class AgentOrchestrator {
     if (!Array.isArray(raw) || raw.length === 0) {
       console.warn(`[Swarm] ⚠️ Plan de escenas vacío, usando fallback de 3 escenas.`);
       return [
-        { promptVisual: fallbackPrompt, spokenDialog: null, voiceOver: null, title: 'DESCUBRE', subtitle: 'La nueva forma de gestionar', mood: 'inspiring', animationStyle: 'cinematic', requiredAsset: null },
-        { promptVisual: fallbackPrompt, spokenDialog: null, voiceOver: null, title: 'CONTROLA TODO', subtitle: 'Desde tu móvil', mood: 'epic', animationStyle: 'slide-up', requiredAsset: 'dashboard' },
-        { promptVisual: fallbackPrompt, spokenDialog: null, voiceOver: null, title: 'EMPIEZA HOY', subtitle: 'Pruébalo gratis', mood: 'inspiring', animationStyle: 'zoom-reveal', requiredAsset: 'logo' },
+        { promptVisual: fallbackPrompt, spokenDialog: 'Así transformamos el campo con datos reales.', voiceOver: null, title: 'DATOS QUE IMPORTAN', subtitle: 'Agricultura conectada', mood: 'inspiring', animationStyle: 'cinematic', requiredAsset: null },
+        { promptVisual: fallbackPrompt, spokenDialog: null, voiceOver: null, title: 'CONTROL TOTAL', subtitle: 'Desde tu móvil', mood: 'epic', animationStyle: 'slide-up', requiredAsset: 'dashboard' },
+        { promptVisual: fallbackPrompt, spokenDialog: 'Empieza hoy con HelpMeAgro.', voiceOver: null, title: 'EMPIEZA HOY', subtitle: 'Pruébalo gratis', mood: 'inspiring', animationStyle: 'minimal-bar', requiredAsset: 'logo' },
       ];
     }
 
-    const VALID_MOODS = ['epic', 'calm', 'urgent', 'playful', 'dark', 'inspiring'];
+    const VALID_MOODS = ['epic', 'calm', 'urgent', 'playful', 'dark', 'inspiring', 'farm', 'news'];
     const VALID_STYLES = ['cinematic', 'glitch', 'slide-up', 'zoom-reveal', 'split', 'typewriter', 'neon-glow', 'minimal-bar'];
+    const GENERIC = /^(descubre|contenido|calidad|swarm|más info)/i;
 
-    return raw.slice(0, 6).map((s, i) => ({
-      promptVisual: (typeof s.promptVisual === 'string' && s.promptVisual.length > 10) ? s.promptVisual : fallbackPrompt,
-      spokenDialog: (typeof s.spokenDialog === 'string' && s.spokenDialog.length > 0) ? s.spokenDialog : null,
-      voiceOver: (typeof s.voiceOver === 'string' && s.voiceOver.length > 0) ? s.voiceOver : null,
-      title: (typeof s.title === 'string' && s.title.length > 1) ? s.title.toUpperCase() : `ESCENA ${i + 1}`,
-      subtitle: (typeof s.subtitle === 'string') ? s.subtitle : '',
-      mood: VALID_MOODS.includes(s.mood) ? s.mood : 'inspiring',
-      animationStyle: VALID_STYLES.includes(s.animationStyle) ? s.animationStyle : VALID_STYLES[i % VALID_STYLES.length],
-      requiredAsset: s.requiredAsset || null,
-    }));
+    return raw.slice(0, 6).map((s, i) => {
+      let dialog = (typeof s.spokenDialog === 'string' && s.spokenDialog.trim().length > 0) ? s.spokenDialog.trim() : null;
+      if (dialog) {
+        dialog = dialog.split(/\s+/).slice(0, 14).join(' ');
+      }
+      let title = (typeof s.title === 'string' && s.title.length > 1) ? s.title.toUpperCase() : `ESCENA ${i + 1}`;
+      if (GENERIC.test(title)) {
+        title = i === 0 ? 'EL DATO CLAVE' : `PUNTO ${i + 1}`;
+      }
+      return {
+        promptVisual: (typeof s.promptVisual === 'string' && s.promptVisual.length > 10) ? s.promptVisual : fallbackPrompt,
+        spokenDialog: dialog,
+        voiceOver: (typeof s.voiceOver === 'string' && s.voiceOver.length > 0) ? s.voiceOver : null,
+        title,
+        subtitle: (typeof s.subtitle === 'string') ? s.subtitle : '',
+        mood: VALID_MOODS.includes(s.mood) ? s.mood : 'inspiring',
+        animationStyle: VALID_STYLES.includes(s.animationStyle) ? s.animationStyle : VALID_STYLES[i % VALID_STYLES.length],
+        requiredAsset: s.requiredAsset || null,
+      };
+    });
   }
 
   /**
@@ -786,6 +1169,7 @@ class AgentOrchestrator {
     let approved = false;
     let result = null;
     let feedback = "";
+    let best = { result: null, score: -1 };
 
     while (attempts < this.maxRetries && !approved) {
       attempts++;
@@ -797,20 +1181,30 @@ class AgentOrchestrator {
         REGLAS:
         1. Evalúa SOLO el texto. NO pidas imágenes.
         2. Siglas invariables (ej: 'los DAT').
+        3. Exige gancho fuerte, CTA, hashtags y fidelidad al briefing.
+        4. score < 7 = NO aprobado.
         Devuelve JSON: { "approved": true/false, "feedback": "...", "score": 1-10 }
       `;
       
       const review = await reviewer.execute(reviewInstruction, context);
-      approved = review.approved;
-      feedback = review.feedback;
+      const score = typeof review.score === 'number' ? review.score : (review.approved ? 7 : 5);
+      if (score > best.score) best = { result, score };
+      approved = review.approved === true && score >= 7;
+      feedback = review.feedback || (approved ? '' : `Mejora el copy (score ${score}/10).`);
+      console.log(`[Flow] Review score=${score}, approved=${approved}`);
+    }
+
+    if (!approved) {
+      console.warn(`[Flow] Copy no alcanzó umbral tras ${attempts} intentos. Usando mejor score=${best.score}.`);
+      return best.result || result;
     }
     return result;
   }
 
   async executeVisualWithReview(worker, reviewer, input, context, brandReferenceImages = []) {
+    // Revisión visual desactivada a propósito: el humano aprueba desde el móvil.
     console.log(`[Flow] ${worker.name} (Visual) - Generando imagen única...`);
     
-    // Generamos la imagen directamente sin pasar por el proceso de revisión
     const mediaData = await worker.execute(input, { 
       is_pure_image_request: true,
       referenceImages: brandReferenceImages,

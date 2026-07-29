@@ -27,7 +27,8 @@ class ProductContextService {
           industry: '',
           website: '',
           hashtags: '',
-          defaultHashtags: ''
+          defaultHashtags: '',
+          presenterProfile: ''
         }
       });
     }
@@ -91,6 +92,9 @@ class ProductContextService {
     if (meta.industry) section += `INDUSTRIA: ${meta.industry}\n`;
     if (meta.website) section += `WEBSITE: ${meta.website}\n`;
     if (meta.defaultHashtags) section += `HASHTAGS POR DEFECTO: ${meta.defaultHashtags}\n`;
+    if (meta.presenterProfile) {
+      section += `PRESENTADOR DE MARCA (usar como characterProfile recurrente en Reels): ${meta.presenterProfile}\n`;
+    }
     section += '\n';
 
     if (context) {
@@ -129,6 +133,7 @@ class ProductContextService {
    * Guarda tanto contexto como metadatos en una sola operación.
    */
   saveAll(contextText, metadata) {
+    const existing = this._read();
     const data = {
       context: contextText || '',
       lastUpdated: new Date().toISOString(),
@@ -137,7 +142,8 @@ class ProductContextService {
         industry: metadata?.industry || '',
         website: metadata?.website || '',
         hashtags: metadata?.hashtags || '',
-        defaultHashtags: metadata?.defaultHashtags || ''
+        defaultHashtags: metadata?.defaultHashtags || '',
+        presenterProfile: metadata?.presenterProfile || existing.metadata?.presenterProfile || ''
       }
     };
     this._write(data);

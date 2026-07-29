@@ -1,13 +1,13 @@
 import {
   AbsoluteFill,
   Img,
-  Video,
   interpolate,
   Easing,
   useCurrentFrame,
   useVideoConfig,
   Sequence,
 } from 'remotion';
+import { Audio, Video } from '@remotion/media';
 import {
   TransitionSeries,
   linearTiming,
@@ -30,12 +30,30 @@ const FONT_BODY = interFamily;
 const FONT_MONO = '"JetBrains Mono", "Courier New", monospace';
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
-const SCENE_FRAMES = 150;      // 5 s a 30 fps
+const SCENE_FRAMES = 240;      // 8 s a 30 fps (alineado con clips Veo)
 const TRANSITION_FRAMES = 18;  // 0.6 s de transición
-const FADEOUT_START = SCENE_FRAMES - 25; // Fade-out comienza 25 frames antes del fin
+const FADEOUT_START = SCENE_FRAMES - 30; // Fade-out cerca del final
 
 // ─── Estilos de fondo ───────────────────────────────────────────────────────
 type StyleId = 'cinematic' | 'glitch' | 'slide-up' | 'zoom-reveal' | 'split' | 'typewriter' | 'neon-glow' | 'minimal-bar';
+type SceneRole = 'talking' | 'broll';
+
+export type SwarmScene = {
+  url: string;
+  title: string;
+  subtitle: string;
+  animationStyle?: string | null;
+  mood?: string | null;
+  spokenDialog?: string | null;
+  hasNativeAudio?: boolean;
+  role?: SceneRole | null;
+};
+
+export type SwarmReelProps = {
+  scenes: SwarmScene[];
+  bgmUrl?: string | null;
+  bgmVolume?: number;
+};
 
 const ANIMATION_STYLES: StyleId[] = [
   'cinematic',
@@ -48,17 +66,6 @@ const ANIMATION_STYLES: StyleId[] = [
   'minimal-bar',
 ];
 
-// ─── Mood color map ─────────────────────────────────────────────────────────
-type MoodId = 'epic' | 'calm' | 'urgent' | 'playful' | 'dark' | 'inspiring';
-const MOOD_COLORS: Record<MoodId, string> = {
-  epic: 'rgba(180,140,50,0.15)',
-  calm: 'rgba(74,144,217,0.12)',
-  urgent: 'rgba(255,45,85,0.18)',
-  playful: 'rgba(123,47,190,0.14)',
-  dark: 'rgba(0,0,0,0.25)',
-  inspiring: 'rgba(255,200,50,0.10)',
-};
-
 // ─── Fade-out helper ────────────────────────────────────────────────────────
 function useFadeOut(frame: number): number {
   return interpolate(frame, [FADEOUT_START, SCENE_FRAMES], [1, 0], {
@@ -68,9 +75,11 @@ function useFadeOut(frame: number): number {
 }
 
 // ─── Background ─────────────────────────────────────────────────────────────
-const SceneBackground: React.FC<{ url: string; styleId: StyleId }> = ({ url, styleId }) => {
+const SceneBackground: React.FC<{ url: string; styleId: StyleId; clipVolume: number }> = ({
+  url, styleId, clipVolume,
+}) => {
   const frame = useCurrentFrame();
-  const isVideo = url.toLowerCase().endsWith('.mp4');
+  const isVideo = url.toLowerCase().endsWith('.mp4') || url.toLowerCase().includes('.mp4');
 
   const scaleStart = styleId === 'zoom-reveal' ? 1.35 : 1.05;
   const scaleEnd   = styleId === 'zoom-reveal' ? 1.0  : 1.22;
@@ -86,7 +95,12 @@ const SceneBackground: React.FC<{ url: string; styleId: StyleId }> = ({ url, sty
   return (
     <>
       {isVideo ? (
-        <Video src={url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <Video
+          src={url}
+          volume={clipVolume}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          objectFit="cover"
+        />
       ) : (
         <Img
           src={url}
@@ -101,7 +115,18 @@ const SceneBackground: React.FC<{ url: string; styleId: StyleId }> = ({ url, sty
 };
 
 // ─── Overlays de gradiente ──────────────────────────────────────────────────
-const Gradient: React.FC<{ styleId: StyleId }> = ({ styleId }) => {
+const Gradient: React.FC<{ styleId: StyleId; talkingHead?: boolean }> = ({ styleId, talkingHead }) => {
+  // Talking-head: gradiente suave solo abajo para no tapar boca/ojos
+  if (talkingHead) {
+    return (
+      <AbsoluteFill
+        style={{
+          background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.18) 22%, rgba(0,0,0,0) 42%)',
+        }}
+      />
+    );
+  }
+
   const gradients: Record<StyleId, string> = {
     'cinematic':    'linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.10) 60%)',
     'glitch':       'linear-gradient(160deg, rgba(10,0,30,0.82) 0%, rgba(0,0,0,0.30) 100%)',
@@ -297,7 +322,7 @@ const NeonGlowText: React.FC<{ title: string; subtitle: string }> = ({ title, su
   );
 };
 
-/** MINIMAL-BAR — barra inferior con texto limpio */
+/** MINIMAL-BAR — barra inferior con texto limpio (talking-head friendly) */
 const MinimalBarText: React.FC<{ title: string; subtitle: string }> = ({ title, subtitle }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -309,10 +334,12 @@ const MinimalBarText: React.FC<{ title: string; subtitle: string }> = ({ title, 
 
   return (
     <AbsoluteFill style={{ justifyContent: 'flex-end' }}>
-      <div style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', padding: '40px 60px', transform: `translateY(${barSlide}%)`, opacity: fadeOut }}>
-        <div style={{ width: `${accentWidth}%`, height: '3px', background: 'linear-gradient(90deg, #00f0ff, #7b2fbe)', marginBottom: '20px' }} />
-        <p style={{ color: '#fff', fontSize: '72px', fontWeight: 800, fontFamily: FONT_BODY, textTransform: 'uppercase', lineHeight: 1.1, margin: 0, opacity: textOp }}>{title}</p>
-        <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '32px', fontFamily: FONT_BODY, fontWeight: 400, marginTop: '10px', opacity: textOp }}>{subtitle}</p>
+      <div style={{ background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(16px)', padding: '28px 48px 36px', transform: `translateY(${barSlide}%)`, opacity: fadeOut }}>
+        <div style={{ width: `${accentWidth}%`, height: '2px', background: 'linear-gradient(90deg, #c4a35a, #2d6a4f)', marginBottom: '14px' }} />
+        <p style={{ color: '#fff', fontSize: '48px', fontWeight: 800, fontFamily: FONT_BODY, textTransform: 'uppercase', lineHeight: 1.1, margin: 0, opacity: textOp }}>{title}</p>
+        {subtitle ? (
+          <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: '26px', fontFamily: FONT_BODY, fontWeight: 400, marginTop: '8px', opacity: textOp }}>{subtitle}</p>
+        ) : null}
       </div>
     </AbsoluteFill>
   );
@@ -337,15 +364,39 @@ const Scene: React.FC<{
   subtitle: string;
   sceneIndex: number;
   totalScenes: number;
-}> = ({ url, title, subtitle, sceneIndex, totalScenes }) => {
-  const styleId = ANIMATION_STYLES[sceneIndex % ANIMATION_STYLES.length];
+  animationStyle?: string | null;
+  hasNativeAudio?: boolean;
+  role?: SceneRole | null;
+  spokenDialog?: string | null;
+}> = ({
+  url, title, subtitle, sceneIndex, totalScenes, animationStyle,
+  hasNativeAudio, role, spokenDialog,
+}) => {
+  const isTalking = role === 'talking' || !!spokenDialog;
+  const requested = (animationStyle || '').toLowerCase().replace(/_/g, '-') as StyleId;
+  // Talking-head: barra inferior corta para no tapar la cara
+  const styleId: StyleId = isTalking
+    ? 'minimal-bar'
+    : (ANIMATION_STYLES.includes(requested)
+      ? requested
+      : ANIMATION_STYLES[sceneIndex % ANIMATION_STYLES.length]);
   const TextComp = TEXT_COMPONENTS[styleId];
+  // Diálogo/lip-sync a volumen pleno; B-roll con ambiente un poco más bajo; sin audio → 0
+  const isVideo = url.toLowerCase().includes('.mp4');
+  const clipVolume = isTalking ? 1 : (isVideo && hasNativeAudio ? 0.65 : (isVideo ? 0.45 : 0));
+
+  const displayTitle = isTalking
+    ? title.trim().split(/\s+/).slice(0, 6).join(' ')
+    : title;
+  const displaySubtitle = isTalking
+    ? (subtitle || '').trim().split(/\s+/).slice(0, 8).join(' ')
+    : subtitle;
 
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
-      <SceneBackground url={url} styleId={styleId} />
-      <Gradient styleId={styleId} />
-      <TextComp title={title} subtitle={subtitle} />
+      <SceneBackground url={url} styleId={styleId} clipVolume={clipVolume} />
+      <Gradient styleId={styleId} talkingHead={isTalking} />
+      <TextComp title={displayTitle} subtitle={displaySubtitle} />
       <ProgressBar sceneIndex={sceneIndex} totalScenes={totalScenes} />
     </AbsoluteFill>
   );
@@ -364,13 +415,22 @@ function getTransition(index: number): import('@remotion/transitions').Transitio
 }
 
 // ─── Composición raíz ────────────────────────────────────────────────────────
-export const SwarmReel: React.FC<{
-  scenes: Array<{ url: string; title: string; subtitle: string }>;
-}> = ({ scenes }) => {
+export const SwarmReel: React.FC<SwarmReelProps> = ({
+  scenes,
+  bgmUrl = null,
+  bgmVolume = 0.28,
+}) => {
   if (!scenes || scenes.length === 0) return null;
+
+  // Duck automático solo si hay diálogo nativo (no por ambiente B-roll)
+  const hasDialog = scenes.some(
+    (s) => s.role === 'talking' || !!s.spokenDialog
+  );
+  const effectiveBgmVolume = hasDialog ? Math.min(bgmVolume, 0.08) : bgmVolume;
 
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
+      {bgmUrl ? <Audio src={bgmUrl} volume={effectiveBgmVolume} /> : null}
       <TransitionSeries>
         {scenes.map((scene, i) => (
           <React.Fragment key={i}>
@@ -381,6 +441,10 @@ export const SwarmReel: React.FC<{
                 subtitle={scene.subtitle}
                 sceneIndex={i}
                 totalScenes={scenes.length}
+                animationStyle={scene.animationStyle}
+                hasNativeAudio={scene.hasNativeAudio}
+                role={scene.role}
+                spokenDialog={scene.spokenDialog}
               />
             </TransitionSeries.Sequence>
             {i < scenes.length - 1 && (

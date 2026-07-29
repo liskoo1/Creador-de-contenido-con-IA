@@ -1,5 +1,20 @@
 const mysql = require('mysql2/promise');
 const geminiService = require('./geminiService');
+const botStateService = require('./botStateService');
+
+const ALMERIA_KEYWORDS = [
+  'almería', 'almeria', 'el ejido', 'níjar', 'nijar', 'roquetas',
+  'vícar', 'vicar', 'adra', 'berja', 'cuevas del almanzora',
+  'huércal', 'huercal', 'gádor', 'gador', 'dalías', 'dalias',
+  'poniente almeriense', 'levante almeriense', 'costa de almería',
+  'costa de almeria', 'campo de dalías', 'campo de nijar'
+];
+
+const ANDALUCIA_KEYWORDS = [
+  'andalucía', 'andalucia', 'andluz', 'sevilla', 'granada', 'málaga',
+  'malaga', 'córdoba', 'cordoba', 'jaén', 'jaen', 'huelva', 'cádiz', 'cadiz',
+  'invernadero', 'hortícola', 'horticola'
+];
 
 class AgroDataService {
   constructor() {
@@ -27,11 +42,6 @@ class AgroDataService {
     return this.pool;
   }
 
-  /**
-   * Obtiene los precios medios de N hortalizas aleatorias del dia mas reciente.
-   * @param {number} count - Numero de hortalizas a seleccionar (default: 6)
-   * @returns {Promise<Array>} - Array de { NombreProductoCompleto, Precio, Fecha }
-   */
   async getLatestPrices(count = 6) {
     const pool = this._getPool();
     const limit = parseInt(count || process.env.AGRO_PRICE_CARD_COUNT || 6);
@@ -49,11 +59,22 @@ class AgroDataService {
   }
 
   /**
-   * Obtiene las noticias del dia mas reciente en la base de datos.
-   * @returns {Promise<Array>} - Array de objetos noticia
+   * Noticias del día: prioriza CURDATE(); si no hay, el día más reciente en BD.
    */
   async getLatestNews() {
     const pool = this._getPool();
+
+    const [todayRows] = await pool.execute(
+      `SELECT Id, Titulo, Resumen, UrlImagenPrincipal, FechaPublicacionNoticia, TemasRelacionados, Slug
+       FROM noticias
+       WHERE DATE(FechaPublicacionNoticia) = CURDATE()
+       ORDER BY FechaPublicacionNoticia DESC`
+    );
+
+    if (todayRows.length > 0) {
+      console.log(`[AgroData] ${todayRows.length} noticias de hoy (CURDATE).`);
+      return todayRows;
+    }
 
     const [rows] = await pool.execute(
       `SELECT Id, Titulo, Resumen, UrlImagenPrincipal, FechaPublicacionNoticia, TemasRelacionados, Slug
@@ -64,24 +85,67 @@ class AgroDataService {
        ORDER BY FechaPublicacionNoticia DESC`
     );
 
+    console.log(`[AgroData] Sin noticias de hoy; usando último día en BD (${rows.length} items).`);
     return rows;
   }
 
+  _newsSearchText(n) {
+    const temas = typeof n.TemasRelacionados === 'string'
+      ? n.TemasRelacionados
+      : JSON.stringify(n.TemasRelacionados || '');
+    return `${n.Titulo || ''} ${n.Resumen || ''} ${temas}`.toLowerCase();
+  }
+
+  _matchesAny(text, keywords) {
+    return keywords.some(k => text.includes(k.toLowerCase()));
+  }
+
   /**
-   * Usa Gemini para seleccionar la noticia mas importante de un listado.
-   * @param {Array} noticias - Array de noticias con Titulo y Resumen
-   * @returns {Promise<Object>} - La noticia seleccionada
+   * Selección con prioridad: Almería → Andalucía → resto.
+   * Evita noticias ya publicadas recientemente.
    */
   async selectMostImportantNews(noticias) {
     if (!noticias || noticias.length === 0) return null;
     if (noticias.length === 1) return noticias[0];
 
-    const resumenList = noticias.map((n, i) =>
-      `${i + 1}. TITULO: ${n.Titulo}\n   RESUMEN: ${n.Resumen.substring(0, 200)}...`
+    const recentIds = new Set((botStateService.getRecentNewsIds() || []).map(String));
+    let pool = noticias.filter(n => !recentIds.has(String(n.Id)));
+    if (pool.length === 0) {
+      console.warn('[AgroData] Todas las noticias del día ya se publicaron; reutilizando pool completo.');
+      pool = [...noticias];
+    }
+
+    const almeria = pool.filter(n => this._matchesAny(this._newsSearchText(n), ALMERIA_KEYWORDS));
+    const andalucia = pool.filter(n => this._matchesAny(this._newsSearchText(n), ANDALUCIA_KEYWORDS));
+
+    let candidates = pool;
+    let tier = 'general';
+    if (almeria.length > 0) {
+      candidates = almeria;
+      tier = 'Almería';
+    } else if (andalucia.length > 0) {
+      candidates = andalucia;
+      tier = 'Andalucía';
+    }
+
+    console.log(`[AgroData] Selección noticia: tier=${tier}, candidatas=${candidates.length}/${pool.length}`);
+
+    if (candidates.length === 1) return candidates[0];
+
+    const resumenList = candidates.map((n, i) =>
+      `${i + 1}. TITULO: ${n.Titulo}\n   RESUMEN: ${(n.Resumen || '').substring(0, 200)}...`
     ).join('\n\n');
 
+    const geoHint = tier === 'Almería'
+      ? 'PRIORIDAD MÁXIMA: todas estas noticias ya son de Almería o su entorno. Elige la más impactante.'
+      : tier === 'Andalucía'
+        ? 'PRIORIDAD: noticias andaluzas. Prefiere Almería si aparece; si no, la más relevante para agricultura andaluza.'
+        : 'PRIORIDAD GEOGRÁFICA: si alguna menciona Almería, elígela. Si no, Andalucía. Si no, la más importante del sector.';
+
     const prompt = `
-Eres un editor jefe de un medio agricola. De estas noticias del dia, selecciona la MAS IMPORTANTE y relevante para el sector agricola andaluz.
+Eres un editor jefe de HelpMeAgro (Almería / agricultura andaluza).
+${geoHint}
+De estas noticias, selecciona LA MÁS IMPORTANTE para nuestra audiencia local.
 Responde SOLO con el numero de la noticia elegida (1, 2, 3, etc.), sin explicaciones.
 
 NOTICIAS:
@@ -93,41 +157,24 @@ NUMERO ELEGIDO:`;
     const match = response.match(/\d+/);
     const index = match ? parseInt(match[0]) - 1 : 0;
 
-    return noticias[Math.min(Math.max(index, 0), noticias.length - 1)];
+    return candidates[Math.min(Math.max(index, 0), candidates.length - 1)];
   }
 
-  /**
-   * Construye la URL publica de una noticia en la web de helpmeagro
-   * (para mostrar en el post de Instagram)
-   * @param {Object} noticia - Objeto noticia con Id
-   * @returns {string} - URL publica
-   */
   getNewsUrl(noticia) {
     const base = (process.env.HELPMEAGRO_PUBLIC_URL || 'https://www.helpmeagro.com').replace(/\/+$/, '');
     const slug = noticia.Slug || '';
     return `${base}/noticia/${noticia.Id}/${slug}`;
   }
 
-  /**
-   * Construye la URL local de la imagen de una noticia.
-   * Las imagenes se sirven desde nuestro servidor via /notice_images/
-   * apuntando al directorio NOTICE_IMAGES_DIR configurado en .env
-   * @param {Object} noticia - Objeto noticia con UrlImagenPrincipal
-   * @returns {string|null} - URL local de la imagen o null
-   */
   getNewsImageUrl(noticia) {
     if (!noticia.UrlImagenPrincipal) return null;
-    // UrlImagenPrincipal en BD es tipo "/notice_images/xxx.png"
-    // Nuestro servidor lo sirve en http://localhost:3001/notice_images/xxx.png
     const imagePath = noticia.UrlImagenPrincipal.startsWith('/')
       ? noticia.UrlImagenPrincipal.substring(1)
       : noticia.UrlImagenPrincipal;
-    return `http://localhost:${process.env.PORT || 3001}/${imagePath}`;
+    const serverUrl = (process.env.SERVER_URL || `http://localhost:${process.env.PORT || 3001}`).trim().replace(/\/+$/, '');
+    return `${serverUrl}/${imagePath}`;
   }
 
-  /**
-   * Cierra el pool de conexiones MySQL.
-   */
   async close() {
     if (this.pool) {
       await this.pool.end();

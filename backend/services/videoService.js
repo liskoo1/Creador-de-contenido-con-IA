@@ -107,9 +107,12 @@ class VideoService {
   /**
    * Renderiza un vídeo usando el motor de Remotion (SwarmReel).
    * @param {Array<{url: string, title: string, subtitle: string}>} scenes
+   * @param {{ bgmUrl?: string|null, bgmVolume?: number }} options
    */
-  async renderSwarmReel(scenes) {
+  async renderSwarmReel(scenes, options = {}) {
     const { exec } = require('child_process');
+    const bgmUrl = options.bgmUrl || null;
+    const bgmVolume = typeof options.bgmVolume === 'number' ? options.bgmVolume : 0.28;
 
     // Validar URLs antes de renderizar
     console.log(`[VideoEngine] 🔍 Validando ${scenes.length} URLs de escenas...`);
@@ -129,28 +132,31 @@ class VideoService {
       const outputFilename = `swarm_reel_${timestamp}.mp4`;
       const outputPath = path.resolve(__dirname, '../output', outputFilename);
       
-      // Sanitizar escenas: asegurar que NO hay valores null/undefined que causen crash en FSWatcher
       const sanitizedScenes = validScenes
         .filter(s => s.url && typeof s.url === 'string' && s.url.length > 0)
         .map(s => ({
           url: s.url,
           title: s.title || '',
           subtitle: s.subtitle || '',
+          animationStyle: s.animationStyle || null,
+          mood: s.mood || null,
+          spokenDialog: s.spokenDialog || null,
+          hasNativeAudio: s.hasNativeAudio === true,
+          role: s.role === 'talking' ? 'talking' : (s.role === 'broll' ? 'broll' : (s.spokenDialog ? 'talking' : 'broll')),
         }));
 
       if (sanitizedScenes.length === 0) {
         throw new Error('Ninguna escena tiene URL válida tras sanitización.');
       }
 
-      const props = { scenes: sanitizedScenes };
+      const props = { scenes: sanitizedScenes, bgmUrl, bgmVolume };
       const propsPath = path.join(require('os').tmpdir(), `remotion_swarm_props_${timestamp}.json`);
       fs.writeFileSync(propsPath, JSON.stringify(props));
 
-      console.log(`[VideoEngine] 🎬 Renderizando SwarmReel (${validScenes.length} escenas)...`);
+      console.log(`[VideoEngine] 🎬 Renderizando SwarmReel (${validScenes.length} escenas)${bgmUrl ? ' + BGM' : ''}...`);
       console.log(`[VideoEngine] Props: ${JSON.stringify(validScenes.map(s => ({ url: s.url?.substring(0, 60), title: s.title })))}`);
       const startTime = Date.now();
       
-      // --log=error evita output excesivo; --disable-web-security permite URLs locales
       const cmd = `npx remotion render src/index.ts SwarmReel "${outputPath}" --props="${propsPath}" --log=error`;
       
       const child = exec(cmd, { cwd: enginePath, timeout: RENDER_TIMEOUT_MS, env: getCleanEnv() }, (error, stdout, stderr) => {
@@ -166,7 +172,7 @@ class VideoService {
         
         console.log(`[VideoEngine] ✅ SwarmReel completado en ${elapsed}s: ${outputFilename}`);
         if (stdout) console.log(`[VideoEngine] STDOUT (últimas 300 chars):\n${stdout.slice(-300)}`);
-        resolve({ url: `/output/${outputFilename}` });
+        resolve({ url: `/output/${outputFilename}`, bgmUrl: bgmUrl || null });
       });
     });
   }

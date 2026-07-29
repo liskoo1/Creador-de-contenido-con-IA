@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const botStateService = require('../services/botStateService');
 
 /**
  * Módulo de publicación en Instagram mediante la Graph API de Meta.
@@ -46,7 +45,8 @@ class InstagramPublisher {
    * @returns {object} - Resultado de la publicación.
    */
   async publishImage(imageUrl, caption) {
-    const { token: accessToken, accountId } = botStateService.getInstagramCredentials();
+    const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
+    const accountId = process.env.INSTAGRAM_ACCOUNT_ID;
 
     if (!accessToken || !accountId) {
       console.warn('[Instagram] Credenciales de Meta no configuradas. Publicación simulada.');
@@ -119,7 +119,8 @@ class InstagramPublisher {
    * @returns {object} - Resultado de la publicación.
    */
   async publishReel(videoUrl, caption) {
-    const { token: accessToken, accountId } = botStateService.getInstagramCredentials();
+    const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
+    const accountId = process.env.INSTAGRAM_ACCOUNT_ID;
 
     if (!accessToken || !accountId) {
       console.warn('[Instagram] Credenciales de Meta no configuradas. Reel simulado.');
@@ -203,7 +204,8 @@ class InstagramPublisher {
    * @returns {object} - Resultado de la publicación.
    */
   async publishStory(mediaUrl, mediaType = 'IMAGE') {
-    const { token: accessToken, accountId } = botStateService.getInstagramCredentials();
+    const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
+    const accountId = process.env.INSTAGRAM_ACCOUNT_ID;
 
     if (!accessToken || !accountId) {
       console.warn('[Instagram] Credenciales de Meta no configuradas. Story simulada.');
@@ -280,7 +282,8 @@ class InstagramPublisher {
    * @param {string} caption - Texto del post.
    */
   async publishCarousel(imageUrls, caption) {
-    const { token: accessToken, accountId } = botStateService.getInstagramCredentials();
+    const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
+    const accountId = process.env.INSTAGRAM_ACCOUNT_ID;
 
     if (!accessToken || !accountId) {
       console.warn('[Instagram] Credenciales no configuradas. Carrusel simulado.');

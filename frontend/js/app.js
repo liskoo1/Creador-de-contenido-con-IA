@@ -190,20 +190,6 @@ async function loadBotState() {
             status.textContent = 'Sistema en modo manual';
         }
 
-        const igCircle = document.getElementById('instagram-status-circle');
-        const igBtn = document.getElementById('connect-instagram-btn');
-        if (state.isInstagramConnected) {
-            igCircle.style.backgroundColor = '#34c759';
-            igCircle.title = 'Conectado';
-            igBtn.textContent = '📸 INSTAGRAM CONECTADO';
-            igBtn.style.opacity = '0.7';
-        } else {
-            igCircle.style.backgroundColor = '#ff3b30';
-            igCircle.title = 'Desconectado';
-            igBtn.textContent = '📸 CONECTAR INSTAGRAM';
-            igBtn.style.opacity = '1';
-        }
-
         renderAllowedFormats(state.allowedFormats);
     } catch (e) {
         console.error('Error cargando estado del bot:', e);
@@ -238,20 +224,6 @@ async function pollBotStatus() {
             label.textContent = 'AUTO-PILOT OFF';
             label.classList.remove('autopilot-active-label');
             status.textContent = 'Sistema en modo manual';
-        }
-
-        const igCircle = document.getElementById('instagram-status-circle');
-        const igBtn = document.getElementById('connect-instagram-btn');
-        if (state.isInstagramConnected) {
-            igCircle.style.backgroundColor = '#34c759';
-            igCircle.title = 'Conectado';
-            igBtn.textContent = '📸 INSTAGRAM CONECTADO';
-            igBtn.style.opacity = '0.7';
-        } else {
-            igCircle.style.backgroundColor = '#ff3b30';
-            igCircle.title = 'Desconectado';
-            igBtn.textContent = '📸 CONECTAR INSTAGRAM';
-            igBtn.style.opacity = '1';
         }
     } catch (e) {
         // Silencioso en el polling
@@ -1293,15 +1265,20 @@ async function publishPost(postId) {
         alert('❌ No se pudo identificar el post. Prueba a recargarlo desde el archivo.');
         return;
     }
-    if (!confirm('¿Publicar este contenido en Instagram ahora?')) return;
+    if (!confirm('¿Publicar este contenido en Instagram y Facebook ahora?')) return;
     try {
         const response = await fetch(`${API_BASE}/publish/${postId}`, { method: 'POST' });
         const result = await response.json();
         if (result.mock) {
-            alert('📋 Publicación SIMULADA (credenciales de Meta no configuradas).');
+            alert('📋 Publicación SIMULADA. Revisa INSTAGRAM_* y FACEBOOK_* en el .env');
         } else if (result.success) {
-            const type = result.mediaType === 'reel' ? '🎬 Reel' : '📸 Post';
-            alert(`✅ ¡${type} publicado exitosamente!`);
+            const ig = result.instagram?.success ? '✅ IG' : '⚠️ IG';
+            const fb = result.facebook?.success ? '✅ FB' : '⚠️ FB';
+            const type = result.mediaType === 'reel' ? 'Reel/vídeo' : 'Post';
+            const details = [];
+            if (!result.instagram?.success) details.push('IG: ' + (result.instagram?.error || result.instagram?.message || 'falló'));
+            if (!result.facebook?.success) details.push('FB: ' + (result.facebook?.error || result.facebook?.message || 'falló'));
+            alert(`📤 ${type} enviado — ${ig} · ${fb}${details.length ? '\n' + details.join('\n') : ''}`);
         } else {
             alert('❌ Error: ' + (result.error || 'Desconocido'));
         }

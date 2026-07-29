@@ -107,9 +107,14 @@ class Agent {
       return await geminiService.generateImage(input, context.referenceImages || [], context.aspectRatio || null);
     }
 
-    // Ruta directa para generación de vídeo pura
+    // Ruta directa para generación de vídeo pura (Veo nativo con audio/lip-sync)
     if (this.type === 'video' && context.is_pure_video_request) {
-      return await geminiService.generateVideoClip(input, context.aspectRatio);
+      return await geminiService.generateVideoClip(input, context.aspectRatio, {
+        referenceImagePath: context.referenceImagePath || context.characterLockPath || null,
+        resolution: context.resolution || null,
+        personGeneration: context.personGeneration || null,
+        videoTask: context.videoTask || null
+      });
     }
 
     // Ruta con skill: cargar instrucciones y generar texto

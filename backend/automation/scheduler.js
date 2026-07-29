@@ -129,7 +129,7 @@ class Scheduler {
       const schedMeta = productContextService.getMetadata();
       const productNameLabel = schedMeta.productName || 'nuestro producto';
       const priceBriefing = `Genera la story de precios del día para ${productNameLabel}.`;
-      const newsBriefing = `Genera el post con la noticia más importante del día relacionada con ${schedMeta.industry || 'el sector'}.`;
+      const newsBriefing = `Genera el post con la noticia más importante del día. PRIORIDAD: si hay noticia de Almería del día, úsala; si no, Andalucía; si no, la más relevante del sector ${schedMeta.industry || 'agrícola'}.`;
 
       for (let d = startDay; d <= daysInMonth; d++) {
         const dateObj = new Date(now.getFullYear(), now.getMonth(), d);
@@ -140,7 +140,8 @@ class Scheduler {
           const agroCronHour = process.env.AGRO_DAILY_CRON_HOUR || '08:00';
           // Añadir 30 min al cron para que la planificación sea después del cron de ejecución
           const [aH, aM] = agroCronHour.split(':').map(Number);
-          const priceHour = `${String(aH).padStart(2, '0')}:${String((aM || 0) + 30).padStart(2, '0')}`;
+          const totalMin = (aH || 0) * 60 + (aM || 0) + 30;
+          const priceHour = `${String(Math.floor(totalMin / 60) % 24).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
           const hasPrice = enrichedSchedule.find(e => e.day === d && e.format === 'price-story');
           if (!hasPrice) {
             enrichedSchedule.push({
@@ -206,36 +207,35 @@ class Scheduler {
 
     const schedule = botStateService.getSchedule();
     const dayEntries = schedule.filter(e => e.day === currentDay);
-    const todayEntryIndex = dayEntries.findIndex(e => e.status === 'planned');
 
-    if (todayEntryIndex === -1) {
-      console.log(`[Scheduler] checkAndExecute: No hay entrada 'planned' para hoy (día ${currentDay}).`);
+    // Todas las entradas planned cuya hora ya pasó (no solo la primera)
+    const dueIndexes = [];
+    dayEntries.forEach((entry, idx) => {
+      if (entry.status !== 'planned') return;
+      const [schedHour, schedMin] = (entry.hour || '00:00').split(':').map(Number);
+      const scheduledMinutes = schedHour * 60 + (schedMin || 0);
+      if (currentMinutes >= scheduledMinutes) dueIndexes.push(idx);
+    });
+
+    if (dueIndexes.length === 0) {
+      console.log(`[Scheduler] checkAndExecute: No hay entradas 'planned' pendientes para hoy (día ${currentDay}).`);
       return;
     }
 
-    const todayEntry = dayEntries[todayEntryIndex];
+    console.log(`\x1b[33m[Scheduler] 🚀 ${dueIndexes.length} entrada(s) a ejecutar (día ${currentDay})\x1b[0m`);
 
-    // Convertir la hora programada a minutos para comparación precisa
-    const [schedHour, schedMin] = todayEntry.hour.split(':').map(Number);
-    const scheduledMinutes = schedHour * 60 + (schedMin || 0);
-
-    // Ventana de ejecución: desde la hora programada en adelante
-    const prepWindowStart = scheduledMinutes;
-
-    console.log(`[Scheduler] checkAndExecute: Día=${currentDay}, Hora actual=${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} (${currentMinutes}min), Programado=${todayEntry.hour} (${scheduledMinutes}min)`);
-
-    if (currentMinutes < prepWindowStart) {
-      console.log(`[Scheduler] checkAndExecute: Aún no es la hora de ejecución (programado para las ${todayEntry.hour}).`);
-      return;
-    }
-
-    console.log(`\x1b[33m[Scheduler] 🚀 Hora de generar contenido para el día ${currentDay} (planificado a las ${todayEntry.hour}, ahora ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')})\x1b[0m`);
-    
-    // Enrutar según tipo de contenido
-    if (todayEntry.format === 'price-story' || todayEntry.format === 'news-post') {
-      await this.executeAgroContent(currentDay, todayEntry, todayEntryIndex);
-    } else {
-      await this.executeCreativeContent(currentDay, todayEntry, todayEntryIndex);
+    for (const todayEntryIndex of dueIndexes) {
+      const todayEntry = dayEntries[todayEntryIndex];
+      console.log(`[Scheduler] Ejecutando #${todayEntryIndex}: ${todayEntry.format} @ ${todayEntry.hour}`);
+      try {
+        if (todayEntry.format === 'price-story' || todayEntry.format === 'news-post') {
+          await this.executeAgroContent(currentDay, todayEntry, todayEntryIndex);
+        } else {
+          await this.executeCreativeContent(currentDay, todayEntry, todayEntryIndex);
+        }
+      } catch (e) {
+        console.error(`[Scheduler] Error en entrada #${todayEntryIndex}:`, e.message);
+      }
     }
   }
 
@@ -352,6 +352,7 @@ class Scheduler {
             });
 
             botStateService.updateScheduleEntry(day, index, { status: 'pending_approval', postId: savedPost.id });
+            botStateService.markNewsUsed(newsItem.Id);
             await approvalGateway.sendApprovalEmail(savedPost, entry);
             console.log(`\x1b[32m[Scheduler] ✅ Post de noticia día ${day} generado. Post: ${savedPost.id}\x1b[0m`);
           }
