@@ -701,6 +701,55 @@ function restoreArchiveToMain(id) {
     closeArchive();
 }
 
+function _archiveMediaUrl(src) {
+    if (!src || typeof src !== 'string') return '';
+    if (src.startsWith('http')) return src;
+    return `http://localhost:3001${src.startsWith('/') ? '' : '/'}${src}`;
+}
+
+function _isVideoMediaUrl(src) {
+    return /\.(mp4|webm|mov)($|\?)/i.test(src || '');
+}
+
+/**
+ * Preview HTML para el Swarm Archive: imágenes normales + primer frame de vídeos.
+ */
+function _archivePreviewHtml(post) {
+    const parts = [];
+    const seen = new Set();
+
+    const pushOnce = (key, html) => {
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        parts.push(html);
+    };
+
+    const videoUrl = post.video?.url ? _archiveMediaUrl(post.video.url) : null;
+    const thumbUrl = post.video?.thumbnail ? _archiveMediaUrl(post.video.thumbnail) : null;
+
+    if (thumbUrl) {
+        pushOnce(thumbUrl, `<div class="archive-media-wrap" onclick="window.open('${videoUrl || thumbUrl}')"><img src="${thumbUrl}" alt="video thumb"><span class="archive-play-badge">▶</span></div>`);
+    } else if (videoUrl) {
+        pushOnce(videoUrl, `<div class="archive-media-wrap" onclick="window.open('${videoUrl}')"><video class="archive-thumb-video" src="${videoUrl}" muted playsinline preload="metadata" onloadeddata="try{this.currentTime=0.1}catch(e){}"></video><span class="archive-play-badge">▶</span></div>`);
+    }
+
+    (post.visuals || []).forEach((raw) => {
+        const src = _archiveMediaUrl(raw);
+        if (!src) return;
+        if (_isVideoMediaUrl(src)) {
+            if (videoUrl && src === videoUrl) return;
+            pushOnce(src, `<div class="archive-media-wrap" onclick="window.open('${src}')"><video class="archive-thumb-video" src="${src}" muted playsinline preload="metadata" onloadeddata="try{this.currentTime=0.1}catch(e){}"></video><span class="archive-play-badge">▶</span></div>`);
+        } else {
+            pushOnce(src, `<img src="${src}" onclick="window.open('${src}')" alt="visual">`);
+        }
+    });
+
+    if (parts.length === 0) {
+        return '<span class="label" style="opacity:0.5;">Sin preview</span>';
+    }
+    return parts.join('');
+}
+
 async function loadArchive() {
     const list = document.getElementById('archive-list');
     list.innerHTML = '<p class="label">Loading Archive...</p>';
@@ -723,19 +772,21 @@ async function loadArchive() {
                 </div>
                 <div class="archive-meta">
                     <b>ID: ${post.id.substring(post.id.length - 6)}</b>
-                    <span>TIPO: ${post.contentType.toUpperCase()}</span><br>
+                    <span>TIPO: ${(post.contentType || 'post').toUpperCase()}</span><br>
                     <span>RATIO: ${post.aspectRatio || '1:1'}</span><br>
                     <small>${new Date(post.timestamp).toLocaleString()}</small>
                 </div>
                 <div class="archive-content-preview">
-                    <div class="archive-text">${post.content?.text || post.content?.copy_facebook || 'Solo Gráfico'}</div>
+                    <div class="archive-text">${post.content?.text || post.content?.instagram?.copy || post.content?.facebook?.copy || post.content?.copy_facebook || 'Solo Gráfico'}</div>
                     <div class="archive-images">
-                        ${(post.visuals || []).map(img => `<img src="${img}" onclick="window.open('${img}')">`).join('')}
+                        ${_archivePreviewHtml(post)}
                     </div>
                 </div>
                 <div class="archive-actions">
                     <button class="publish-archive-btn" onclick="restoreArchiveToMain('${post.id}')">🚀 RE-CARGAR</button>
-                    <button class="publish-archive-btn" onclick="publishPost('${post.id}')">📸 PUBLISH</button>
+                    <button class="publish-archive-btn publish-ig" onclick="publishPost('${post.id}', 'instagram')" ${post.publishedTo?.instagram ? 'disabled title="Ya publicado en Instagram"' : ''}>📸 IG</button>
+                    <button class="publish-archive-btn publish-fb" onclick="publishPost('${post.id}', 'facebook')" ${post.publishedTo?.facebook ? 'disabled title="Ya publicado en Facebook"' : ''}>📘 FB</button>
+                    <button class="publish-archive-btn" onclick="publishPost('${post.id}')" ${(post.publishedTo?.instagram && post.publishedTo?.facebook) ? 'disabled title="Ya publicado en ambas"' : ''}>🚀 AMBAS</button>
                     <button class="del-btn" onclick="deletePost('${post.id}')">DELETE</button>
                 </div>
             </div>
@@ -1134,36 +1185,91 @@ function displayResults(data) {
     const hasRemotionVideo = data.video && data.video.url;
 
     if (hasRemotionVideo) {
-        // ── Reel con Remotion: mostrar el vídeo final como protagonista ──
+        // ── Reel: vídeo final como protagonista + preview del primer frame ──
         const videoWrap = document.createElement('div');
         videoWrap.style.cssText = 'position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px;';
 
+        const videoSrc = data.video.url.startsWith('http') ? data.video.url : `http://localhost:3001${data.video.url}`;
         const video = document.createElement('video');
-        video.src = data.video.url.startsWith('http') ? data.video.url : `http://localhost:3001${data.video.url}`;
+        video.src = videoSrc;
         video.controls = true;
         video.loop = true;
         video.style.cssText = 'max-height:80%; max-width:100%; border-radius:12px; box-shadow:0 0 40px rgba(0,243,255,0.15);';
         videoWrap.appendChild(video);
 
-        // Miniaturas de los fondos usados (referencia)
-        if (data.visuals && data.visuals.length > 0) {
-            const thumbsLabel = document.createElement('div');
-            thumbsLabel.style.cssText = 'font-family:"JetBrains Mono",monospace; font-size:0.6rem; color:var(--accent); letter-spacing:2px; margin-top:6px;';
-            thumbsLabel.textContent = 'SCENE_BACKGROUNDS';
-            videoWrap.appendChild(thumbsLabel);
+        const thumbsRow = document.createElement('div');
+        thumbsRow.style.cssText = 'display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; align-items:center;';
 
-            const thumbsRow = document.createElement('div');
-            thumbsRow.style.cssText = 'display:flex; gap:8px; overflow-x:auto; padding-bottom:4px;';
-            data.visuals.forEach(src => {
+        const addThumbLabel = (text) => {
+            const thumbsLabel = document.createElement('div');
+            thumbsLabel.style.cssText = 'font-family:"JetBrains Mono",monospace; font-size:0.6rem; color:var(--accent); letter-spacing:2px; margin-top:6px; width:100%; text-align:center;';
+            thumbsLabel.textContent = text;
+            videoWrap.appendChild(thumbsLabel);
+        };
+
+        const appendMediaThumb = (src, isVideo) => {
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'position:relative; height:60px; border-radius:6px; border:1px solid var(--border); overflow:hidden; flex-shrink:0; cursor:pointer; background:#000;';
+            if (isVideo) {
+                const v = document.createElement('video');
+                v.src = src;
+                v.muted = true;
+                v.playsInline = true;
+                v.preload = 'metadata';
+                v.style.cssText = 'height:60px; width:auto; max-width:110px; object-fit:cover; display:block; opacity:0.85;';
+                v.addEventListener('loadeddata', () => { try { v.currentTime = 0.1; } catch (e) {} });
+                wrap.appendChild(v);
+                const badge = document.createElement('span');
+                badge.textContent = '▶';
+                badge.style.cssText = 'position:absolute;right:4px;bottom:4px;font-size:9px;color:#fff;background:rgba(0,0,0,0.6);border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;';
+                wrap.appendChild(badge);
+            } else {
                 const thumb = document.createElement('img');
-                thumb.src = src.startsWith('http') ? src : `http://localhost:3001${src}`;
-                thumb.style.cssText = 'height:60px; width:auto; border-radius:6px; border:1px solid var(--border); flex-shrink:0; cursor:pointer; opacity:0.7; transition:opacity 0.2s;';
-                thumb.onmouseover = () => { thumb.style.opacity = '1'; };
-                thumb.onmouseleave = () => { thumb.style.opacity = '0.7'; };
-                thumbsRow.appendChild(thumb);
-            });
+                thumb.src = src;
+                thumb.style.cssText = 'height:60px; width:auto; max-width:110px; object-fit:cover; display:block; opacity:0.85;';
+                wrap.appendChild(thumb);
+            }
+            wrap.onclick = () => window.open(src.startsWith('http') && !isVideo ? src : videoSrc, '_blank');
+            thumbsRow.appendChild(wrap);
+        };
+
+        const normalize = (u) => (!u ? '' : (u.startsWith('http') ? u : `http://localhost:3001${u.startsWith('/') ? '' : '/'}${u}`));
+        const isVid = (u) => /\.(mp4|webm|mov)($|\?)/i.test(u || '');
+        let thumbCount = 0;
+
+        // 1) Thumbnail oficial del primer frame (ffmpeg)
+        if (data.video.thumbnail) {
+            appendMediaThumb(normalize(data.video.thumbnail), false);
+            thumbCount++;
+        }
+
+        // 2) Fondos/escenas que sean imágenes reales (no el MP4 final)
+        (data.visuals || []).forEach((raw) => {
+            const src = normalize(raw);
+            if (!src) return;
+            if (isVid(src)) {
+                // Evitar duplicar el mismo vídeo final como <img> roto
+                if (src === videoSrc || src.replace(/https?:\/\/[^/]+/, '') === videoSrc.replace(/https?:\/\/[^/]+/, '')) return;
+                appendMediaThumb(src, true);
+                thumbCount++;
+                return;
+            }
+            appendMediaThumb(src, false);
+            thumbCount++;
+        });
+
+        // 3) Fallback: si no hay thumbnail ni imágenes, preview del propio vídeo
+        if (thumbCount === 0) {
+            appendMediaThumb(videoSrc, true);
+            thumbCount++;
+        }
+
+        if (thumbCount > 0) {
+            const onlyVideoPreview = !!data.video.thumbnail || !(data.visuals || []).some(v => !isVid(normalize(v)));
+            addThumbLabel(onlyVideoPreview ? 'PREVIEW' : 'SCENE_BACKGROUNDS');
             videoWrap.appendChild(thumbsRow);
         }
+
         visualSide.appendChild(videoWrap);
 
     } else if (isCarousel && data.visuals && data.visuals.length > 1) {
@@ -1249,8 +1355,10 @@ function displayResults(data) {
                 <p style="font-size:1.1rem; line-height:1.6; color:#fff">${igCopy}</p>
                 <p style="color:var(--accent); margin-top:10px; font-family:'JetBrains Mono'; font-size:0.85rem">${igHash}</p>
             </div>` : ''}
-            <div style="margin-top:auto; padding-top:20px">
-                <button class="primary-btn" style="width:100%" onclick="publishPost('${window._lastPostId}')">${hasRemotionVideo ? '🎬 PUBLICAR REEL' : (isCarousel ? '🎠 PUBLICAR CARRUSEL' : (isPriceStory ? '📊 PUBLICAR STORY PRECIOS' : (isNewsPost ? '📰 PUBLICAR NOTICIA' : '📸 PUBLICAR POST')))}</button>
+            <div class="publish-platform-row" style="margin-top:auto; padding-top:20px; display:flex; flex-direction:column; gap:10px">
+                <button class="primary-btn publish-ig" style="width:100%" onclick="publishPost('${window._lastPostId}', 'instagram')">📸 PUBLICAR EN INSTAGRAM</button>
+                <button class="primary-btn publish-fb" style="width:100%" onclick="publishPost('${window._lastPostId}', 'facebook')">📘 PUBLICAR EN FACEBOOK</button>
+                <button class="primary-btn publish-both" style="width:100%; opacity:0.85" onclick="publishPost('${window._lastPostId}')">${hasRemotionVideo ? '🎬 AMBAS (REEL)' : (isCarousel ? '🎠 AMBAS (CARRUSEL)' : (isPriceStory ? '📊 AMBAS (STORY)' : (isNewsPost ? '📰 AMBAS (NOTICIA)' : '🚀 AMBAS PLATAFORMAS')))}</button>
             </div>
         `;
     }
@@ -1260,25 +1368,47 @@ function displayResults(data) {
     viewer.appendChild(splitContainer);
 }
 
-async function publishPost(postId) {
+async function publishPost(postId, platform) {
     if (!postId || postId === 'null') {
         alert('❌ No se pudo identificar el post. Prueba a recargarlo desde el archivo.');
         return;
     }
-    if (!confirm('¿Publicar este contenido en Instagram y Facebook ahora?')) return;
+    const platforms = platform ? [platform] : ['instagram', 'facebook'];
+    const label = platforms.length === 2
+        ? 'Instagram y Facebook'
+        : (platforms[0] === 'instagram' ? 'Instagram' : 'Facebook');
+    if (!confirm(`¿Publicar este contenido en ${label} ahora?`)) return;
     try {
-        const response = await fetch(`${API_BASE}/publish/${postId}`, { method: 'POST' });
+        const response = await fetch(`${API_BASE}/publish/${postId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ platforms })
+        });
         const result = await response.json();
+        if (!response.ok) {
+            alert('❌ ' + (result.error || 'Error al publicar'));
+            return;
+        }
         if (result.mock) {
             alert('📋 Publicación SIMULADA. Revisa INSTAGRAM_* y FACEBOOK_* en el .env');
         } else if (result.success) {
-            const ig = result.instagram?.success ? '✅ IG' : '⚠️ IG';
-            const fb = result.facebook?.success ? '✅ FB' : '⚠️ FB';
+            const parts = [];
+            if (!result.instagram?.skipped) {
+                parts.push(result.instagram?.success ? '✅ IG' : '⚠️ IG');
+            }
+            if (!result.facebook?.skipped) {
+                parts.push(result.facebook?.success ? '✅ FB' : '⚠️ FB');
+            }
             const type = result.mediaType === 'reel' ? 'Reel/vídeo' : 'Post';
             const details = [];
-            if (!result.instagram?.success) details.push('IG: ' + (result.instagram?.error || result.instagram?.message || 'falló'));
-            if (!result.facebook?.success) details.push('FB: ' + (result.facebook?.error || result.facebook?.message || 'falló'));
-            alert(`📤 ${type} enviado — ${ig} · ${fb}${details.length ? '\n' + details.join('\n') : ''}`);
+            if (!result.instagram?.skipped && !result.instagram?.success) {
+                details.push('IG: ' + (result.instagram?.error || result.instagram?.message || 'falló'));
+            }
+            if (!result.facebook?.skipped && !result.facebook?.success) {
+                details.push('FB: ' + (result.facebook?.error || result.facebook?.message || 'falló'));
+            }
+            alert(`📤 ${type} enviado — ${parts.join(' · ')}${details.length ? '\n' + details.join('\n') : ''}`);
+            if (typeof loadArchive === 'function') loadArchive().catch(() => {});
         } else {
             alert('❌ Error: ' + (result.error || 'Desconocido'));
         }

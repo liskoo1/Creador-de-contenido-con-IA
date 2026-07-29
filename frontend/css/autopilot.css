@@ -590,3 +590,30 @@
   box-shadow: 0 4px 15px rgba(253, 29, 29, 0.4);
   transform: translateY(-1px);
 }
+
+.publish-archive-btn.publish-ig {
+  background: linear-gradient(135deg, #833ab4, #e1306c);
+}
+
+.publish-archive-btn.publish-fb {
+  background: linear-gradient(135deg, #1877f2, #0d5dbf);
+}
+
+.publish-archive-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.primary-btn.publish-ig {
+  background: linear-gradient(135deg, #833ab4, #e1306c);
+}
+
+.primary-btn.publish-fb {
+  background: linear-gradient(135deg, #1877f2, #0d5dbf);
+}
+
+.primary-btn.publish-both {
+  background: linear-gradient(135deg, #833ab4, #1877f2);
+}

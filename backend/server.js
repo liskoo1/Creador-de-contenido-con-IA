@@ -29,6 +29,9 @@ const agroDataService = require('./services/agroDataService');
 const agroImageService = require('./services/agroImageService');
 const productContextService = require('./services/productContextService');
 
+/** Candado en memoria: evita doble publicación concurrente del mismo postId (doble clic email). */
+const activePublishLocks = new Set();
+
 // === INICIALIZACIÓN DE DIRECTORIOS ===
 const requiredDirs = [
   'data/assets',
@@ -321,7 +324,24 @@ app.post('/api/ai/suggest-idea', async (req, res) => {
 /**
  * Endpoints de Historial (NoSQL Store)
  */
-app.get('/api/posts', (req, res) => {
+app.get('/api/posts', async (req, res) => {
+  const posts = postService.getAll();
+  const videoService = require('./services/videoService');
+
+  // Backfill de thumbnails para vídeos antiguos (archive sin preview)
+  for (const post of posts) {
+    if (!post.video?.url || post.video.thumbnail) continue;
+    try {
+      const thumb = await videoService.extractVideoThumbnail(post.video.url);
+      if (thumb?.url) {
+        post.video.thumbnail = thumb.url;
+        postService.update(post.id, { video: post.video });
+      }
+    } catch (e) {
+      console.warn(`[API] Thumbnail backfill falló para ${post.id}: ${e.message}`);
+    }
+  }
+
   res.json(postService.getAll());
 });
 
@@ -446,11 +466,41 @@ app.post('/api/create-audio-reel', uploadAudio.single('audioFile'), async (req, 
 });
 
 /**
- * Publicación manual desde el Frontend (Instagram + Facebook vía tokens .env)
+ * Publicación manual desde el Frontend (Instagram y/o Facebook vía tokens .env)
+ * Body opcional: { platforms: ['instagram'] | ['facebook'] | ['instagram','facebook'] }
  */
 app.post('/api/publish/:id', async (req, res) => {
-  const post = postService.getAll().find(p => p.id === req.params.id);
+  const postId = req.params.id;
+  const post = postService.getAll().find(p => p.id === postId);
   if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
+
+  const rawPlatforms = req.body?.platforms || req.query?.platforms || ['instagram', 'facebook'];
+  const platforms = (Array.isArray(rawPlatforms) ? rawPlatforms : String(rawPlatforms).split(','))
+    .map(p => String(p).trim().toLowerCase())
+    .filter(p => p === 'instagram' || p === 'facebook');
+
+  if (platforms.length === 0) {
+    return res.status(400).json({ error: 'Indica al menos una plataforma: instagram o facebook.' });
+  }
+
+  const publishedTo = post.publishedTo || {};
+  const already = platforms.filter(p => publishedTo[p]);
+  const pending = platforms.filter(p => !publishedTo[p]);
+
+  if (pending.length === 0) {
+    return res.status(409).json({
+      error: `Ya publicado en: ${already.join(', ')}.`,
+      alreadyPublished: true,
+      publishedTo
+    });
+  }
+
+  const lockKey = `${postId}:${pending.sort().join('+')}`;
+  if (activePublishLocks.has(postId) || activePublishLocks.has(lockKey)) {
+    return res.status(409).json({ error: 'Publicación ya en curso para este post.', inProgress: true });
+  }
+  activePublishLocks.add(postId);
+  activePublishLocks.add(lockKey);
 
   const igCaption = post.content?.instagram?.copy
     ? `${post.content.instagram.copy}\n\n${post.content.instagram.hashtags || ''}`.trim()
@@ -462,29 +512,49 @@ app.post('/api/publish/:id', async (req, res) => {
 
   const contentType = post.contentType || 'post';
   const hasVideo = post.video && post.video.url;
+  const publishOpts = { platforms: pending };
 
   try {
     let result;
     if (contentType === 'price-story' && post.visuals && post.visuals.length >= 1) {
-      result = await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption);
+      result = await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption, publishOpts);
 
     } else if (hasVideo && (contentType === 'video' || contentType === 'audio-reel' || contentType === 'reel')) {
-      result = await publishingService.publishViaBridge(post.video.url, 'reel', caption, fbCaption);
+      result = await publishingService.publishViaBridge(post.video.url, 'reel', caption, fbCaption, publishOpts);
 
     } else if (contentType === 'carousel' && post.visuals && post.visuals.length > 1) {
-      result = await publishingService.publishViaBridge(post.visuals, 'carousel', caption, fbCaption);
+      result = await publishingService.publishViaBridge(post.visuals, 'carousel', caption, fbCaption, publishOpts);
 
     } else if (post.visuals && post.visuals.length >= 1) {
-      result = await publishingService.publishViaBridge(post.visuals[0], 'image', caption, fbCaption);
+      result = await publishingService.publishViaBridge(post.visuals[0], 'image', caption, fbCaption, publishOpts);
 
     } else {
       return res.status(400).json({ error: 'No hay contenido visual para publicar.' });
     }
-    
-    console.log(`\x1b[32m[API] Publicación: IG=${result.instagram?.success ? 'OK' : 'NO'} FB=${result.facebook?.success ? 'OK' : 'NO'}\x1b[0m`);
-    res.json(result);
+
+    const now = new Date().toISOString();
+    const nextPublishedTo = { ...publishedTo };
+    if (result.instagram?.success) nextPublishedTo.instagram = now;
+    if (result.facebook?.success) nextPublishedTo.facebook = now;
+
+    const bothDone = !!(nextPublishedTo.instagram && nextPublishedTo.facebook);
+    const updates = {
+      publishedTo: nextPublishedTo,
+      publishedAt: post.publishedAt || (result.success ? now : null)
+    };
+    postService.update(postId, updates);
+
+    if (bothDone) {
+      botStateService.markApprovalPublished(postId);
+    }
+
+    console.log(`\x1b[32m[API] Publicación [${pending.join('+')}]: IG=${result.instagram?.success ? 'OK' : (result.instagram?.skipped ? 'SKIP' : 'NO')} FB=${result.facebook?.success ? 'OK' : (result.facebook?.skipped ? 'SKIP' : 'NO')}\x1b[0m`);
+    res.json({ ...result, publishedTo: nextPublishedTo });
   } catch (e) {
     return res.status(500).json({ error: e.message });
+  } finally {
+    activePublishLocks.delete(postId);
+    activePublishLocks.delete(lockKey);
   }
 });
 
@@ -815,15 +885,26 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
   const post = postService.getAll().find(p => p.id === postId);
   if (!post) return res.send(renderWebhookPage('error', 'Post no encontrado.'));
 
-  // Actualizar estado en el calendario
-  const schedule = botStateService.getSchedule();
-  const entry = schedule.find(e => e.postId === postId);
-  if (entry) {
-    botStateService.updateScheduleEntryByPostId(postId, { status: 'approved' });
+  // Anti-duplicado: ya publicado en el propio post
+  if (post.publishedAt) {
+    return res.send(renderWebhookPage('approved', 'Este contenido ya estaba publicado. No se ha vuelto a publicar.'));
   }
-  botStateService.removePendingApproval(postId);
 
-  // Publicar en Instagram + Facebook
+  // Candado en memoria ANTES de cualquier await (doble clic / prefetch email)
+  if (activePublishLocks.has(postId)) {
+    return res.send(renderWebhookPage('approved', 'Publicación ya en curso. No se duplicará.'));
+  }
+  activePublishLocks.add(postId);
+
+  const claim = botStateService.tryClaimApprovalPublish(postId);
+  if (!claim.claimed) {
+    activePublishLocks.delete(postId);
+    const msg = claim.status === 'published'
+      ? 'Este contenido ya estaba publicado. No se ha vuelto a publicar.'
+      : 'Publicación ya en curso o previamente aprobada. No se duplicará.';
+    return res.send(renderWebhookPage('approved', msg));
+  }
+
   const igCaption = post.content?.instagram?.copy
     ? `${post.content.instagram.copy}\n\n${post.content.instagram.hashtags || ''}`.trim()
     : '';
@@ -835,7 +916,6 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
   try {
     if (post.video && post.video.url && (post.contentType === 'video' || post.contentType === 'audio-reel' || post.contentType === 'reel')) {
       await publishingService.publishViaBridge(post.video.url, 'reel', caption, fbCaption);
-      if (entry) botStateService.updateScheduleEntryByPostId(postId, { status: 'published' });
     } else if (post.visuals && post.visuals.length > 0) {
       if (post.contentType === 'price-story') {
         await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption);
@@ -844,13 +924,25 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
       } else {
         await publishingService.publishViaBridge(post.visuals[0], 'image', caption, fbCaption);
       }
-      if (entry) botStateService.updateScheduleEntryByPostId(postId, { status: 'published' });
+    } else {
+      botStateService.releaseApprovalPublishClaim(postId);
+      return res.send(renderWebhookPage('error', 'No hay contenido visual/vídeo para publicar.'));
     }
+
+    const now = new Date().toISOString();
+    botStateService.markApprovalPublished(postId);
+    postService.update(postId, {
+      publishedAt: now,
+      publishedTo: { instagram: now, facebook: now }
+    });
+    res.send(renderWebhookPage('approved', '¡Contenido aprobado y enviado a publicación (IG + FB)!'));
   } catch (e) {
     console.error('[Webhook] Error publicando:', e.message);
+    botStateService.releaseApprovalPublishClaim(postId);
+    res.send(renderWebhookPage('error', `Error al publicar: ${e.message}. Puedes reintentar el enlace.`));
+  } finally {
+    activePublishLocks.delete(postId);
   }
-
-  res.send(renderWebhookPage('approved', '¡Contenido aprobado y enviado a publicación (IG + FB)!'));
 });
 
 app.get('/api/webhooks/reject/:postId', async (req, res) => {
@@ -859,6 +951,11 @@ app.get('/api/webhooks/reject/:postId', async (req, res) => {
 
   const post = postService.getAll().find(p => p.id === postId);
   if (!post) return res.send(renderWebhookPage('error', 'Post no encontrado.'));
+
+  const claimStatus = botStateService.getPublishClaimStatus(postId);
+  if (post.publishedAt || claimStatus === 'published' || claimStatus === 'publishing') {
+    return res.send(renderWebhookPage('error', 'Este contenido ya se está publicando o ya fue publicado. No se puede rechazar.'));
+  }
 
   const schedule = botStateService.getSchedule();
   const entry = schedule.find(e => e.postId === postId);

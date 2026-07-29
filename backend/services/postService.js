@@ -37,6 +37,18 @@ class PostService {
   }
 
   /**
+   * Actualiza campos de un post existente (p. ej. publishedAt).
+   */
+  update(id, updates) {
+    const posts = this.getAll();
+    const idx = posts.findIndex(p => p.id === id);
+    if (idx === -1) return null;
+    posts[idx] = { ...posts[idx], ...updates };
+    fs.writeFileSync(POSTS_PATH, JSON.stringify(posts, null, 2));
+    return posts[idx];
+  }
+
+  /**
    * Convierte una URL o ruta relativa de un archivo generado a su ruta absoluta en disco.
    * Acepta formatos: "http://localhost:PORT/output/file.png", "/output/file.png", "output/file.png"
    */
@@ -82,13 +94,14 @@ class PostService {
     const post = posts.find(p => p.id === id);
 
     if (post) {
-      // Borrar imágenes del carrusel / slides
       if (Array.isArray(post.visuals)) {
         post.visuals.forEach(url => this._deleteFile(url));
       }
-      // Borrar video final si existe
       if (post.video?.url) {
         this._deleteFile(post.video.url);
+      }
+      if (post.video?.thumbnail) {
+        this._deleteFile(post.video.thumbnail);
       }
     }
 

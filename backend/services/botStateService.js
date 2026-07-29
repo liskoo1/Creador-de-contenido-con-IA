@@ -195,6 +195,71 @@ class BotStateService {
   }
 
   /**
+   * Claim atómico para publicar una sola vez (anti-doble clic en email / race).
+   * Solo permite claim si aún no está publishing/published.
+   * @returns {{ claimed: boolean, status: string, entry: object|null }}
+   */
+  tryClaimApprovalPublish(postId) {
+    const state = this._read();
+    if (!state.publishClaims) state.publishClaims = {};
+
+    const entry = state.schedule.find(e => e.postId === postId) || null;
+    const claimStatus = state.publishClaims[postId] || null;
+    const entryStatus = entry?.status || null;
+
+    const blocked = ['publishing', 'published'];
+    if (blocked.includes(claimStatus) || blocked.includes(entryStatus)) {
+      const status = (claimStatus === 'published' || entryStatus === 'published')
+        ? 'published'
+        : 'publishing';
+      return { claimed: false, status, entry };
+    }
+
+    state.publishClaims[postId] = 'publishing';
+    if (entry) entry.status = 'publishing';
+    // Quitar de pendientes al claimar para que un 2º clic no lo vea como pendiente
+    state.pendingApproval = (state.pendingApproval || []).filter(p => p.id !== postId);
+    this._write(state);
+    return { claimed: true, status: 'publishing', entry };
+  }
+
+  markApprovalPublished(postId) {
+    const state = this._read();
+    if (!state.publishClaims) state.publishClaims = {};
+    state.publishClaims[postId] = 'published';
+    const entry = state.schedule.find(e => e.postId === postId);
+    if (entry) entry.status = 'published';
+    state.pendingApproval = (state.pendingApproval || []).filter(p => p.id !== postId);
+    this._write(state);
+  }
+
+  /**
+   * Libera el claim si la publicación falló, para permitir reintento consciente.
+   */
+  releaseApprovalPublishClaim(postId) {
+    const state = this._read();
+    if (!state.publishClaims) state.publishClaims = {};
+    if (state.publishClaims[postId] === 'publishing') {
+      delete state.publishClaims[postId];
+    }
+    const entry = state.schedule.find(e => e.postId === postId);
+    if (entry && entry.status === 'publishing') {
+      entry.status = 'pending_approval';
+    }
+    this._write(state);
+  }
+
+  getPublishClaimStatus(postId) {
+    const state = this._read();
+    const claim = state.publishClaims?.[postId] || null;
+    const entry = state.schedule.find(e => e.postId === postId);
+    if (claim === 'published' || entry?.status === 'published') return 'published';
+    if (claim === 'publishing' || entry?.status === 'publishing') return 'publishing';
+    if (claim === 'approved' || entry?.status === 'approved') return 'approved';
+    return entry?.status || claim || null;
+  }
+
+  /**
    * IDs de noticias publicadas recientemente (anti-duplicado).
    * @param {number} limit
    */

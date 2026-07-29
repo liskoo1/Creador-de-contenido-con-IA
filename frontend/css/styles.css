@@ -307,8 +307,42 @@ body {
 }
 .archive-meta b { color: var(--accent); display: block; margin-bottom: 5px; font-family: 'JetBrains Mono'; font-size: 0.75rem; }
 .archive-text { font-size: 0.85rem; line-height: 1.6; color: #ccc; white-space: pre-wrap; max-height: 150px; overflow-y: auto; }
-.archive-images { display: flex; gap: 10px; margin-top: 15px; overflow-x: auto; }
-.archive-images img { height: 80px; border: 1px solid var(--border); border-radius: 4px; }
+.archive-images { display: flex; gap: 10px; margin-top: 15px; overflow-x: auto; align-items: flex-start; }
+.archive-images img { height: 80px; border: 1px solid var(--border); border-radius: 4px; object-fit: cover; cursor: pointer; }
+.archive-media-wrap {
+  position: relative;
+  height: 80px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #000;
+  flex-shrink: 0;
+}
+.archive-media-wrap img,
+.archive-thumb-video {
+  height: 80px;
+  width: auto;
+  max-width: 140px;
+  object-fit: cover;
+  display: block;
+  border: none;
+}
+.archive-play-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.65);
+  color: #fff;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
 .del-btn { background: rgba(255,0,0,0.1); color: #ff4444; border: 1px solid #ff4444; padding: 10px; cursor: pointer; font-family: 'JetBrains Mono'; font-size: 0.6rem; }
 .del-btn:hover { background: #ff4444; color: #fff; }
 

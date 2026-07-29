@@ -172,9 +172,70 @@ class VideoService {
         
         console.log(`[VideoEngine] ✅ SwarmReel completado en ${elapsed}s: ${outputFilename}`);
         if (stdout) console.log(`[VideoEngine] STDOUT (últimas 300 chars):\n${stdout.slice(-300)}`);
-        resolve({ url: `/output/${outputFilename}`, bgmUrl: bgmUrl || null });
+        this.extractVideoThumbnail(outputPath)
+          .then((thumb) => {
+            resolve({
+              url: `/output/${outputFilename}`,
+              bgmUrl: bgmUrl || null,
+              thumbnail: thumb?.url || null
+            });
+          })
+          .catch(() => {
+            resolve({ url: `/output/${outputFilename}`, bgmUrl: bgmUrl || null, thumbnail: null });
+          });
       });
     });
+  }
+
+  /**
+   * Extrae el primer frame de un MP4 como JPG para previews (archive, etc.).
+   * @param {string} videoPathOrUrl - Ruta absoluta o URL/path tipo /output/file.mp4
+   * @returns {Promise<{path:string,url:string}|null>}
+   */
+  async extractVideoThumbnail(videoPathOrUrl) {
+    const { execFile } = require('child_process');
+    const { promisify } = require('util');
+    const execFileAsync = promisify(execFile);
+
+    let abs = videoPathOrUrl;
+    if (!abs) return null;
+    if (String(abs).startsWith('http') || String(abs).includes('/output/')) {
+      try {
+        let pathname = abs;
+        if (abs.startsWith('http')) pathname = new URL(abs).pathname;
+        const relative = pathname.replace(/^\/output\//, '').replace(/^output\//, '');
+        abs = path.resolve(__dirname, '../output', relative);
+      } catch {
+        return null;
+      }
+    }
+
+    if (!fs.existsSync(abs)) {
+      console.warn(`[VideoEngine] Thumbnail: no existe ${abs}`);
+      return null;
+    }
+
+    const base = path.basename(abs, path.extname(abs));
+    const thumbName = `thumb_${base}.jpg`;
+    const thumbPath = path.join(path.dirname(abs), thumbName);
+
+    try {
+      // Frame cercano al inicio (0.15s) para evitar frame negro
+      await execFileAsync('ffmpeg', [
+        '-y', '-ss', '0.15', '-i', abs,
+        '-frames:v', '1', '-q:v', '3',
+        thumbPath
+      ], { timeout: 30000 });
+
+      if (!fs.existsSync(thumbPath) || fs.statSync(thumbPath).size < 100) {
+        return null;
+      }
+      console.log(`[VideoEngine] 🖼️ Thumbnail: ${thumbName}`);
+      return { path: thumbPath, url: `/output/${thumbName}` };
+    } catch (e) {
+      console.warn(`[VideoEngine] No se pudo extraer thumbnail: ${e.message}`);
+      return null;
+    }
   }
 
   /**
@@ -253,7 +314,9 @@ class VideoService {
         }
 
         console.log(`[VideoEngine] ✅ Audio Reel completado en ${elapsed}s: ${outputFilename}`);
-        resolve({ url: `/output/${outputFilename}` });
+        this.extractVideoThumbnail(outputPath)
+          .then((thumb) => resolve({ url: `/output/${outputFilename}`, thumbnail: thumb?.url || null }))
+          .catch(() => resolve({ url: `/output/${outputFilename}`, thumbnail: null }));
       });
     });
   }

@@ -400,13 +400,23 @@ class GeminiService {
       const probe = await this.probeVideoAudio(filePath);
       console.log(`[GeminiService] Video OK. hasAudio=${probe.hasAudio} duration=${probe.duration}s codec=${probe.audioCodec}`);
 
+      let thumbnail = null;
+      try {
+        const videoService = require('./videoService');
+        const thumb = await videoService.extractVideoThumbnail(filePath);
+        thumbnail = thumb?.url || null;
+      } catch (e) {
+        console.warn(`[GeminiService] Thumbnail omitido: ${e.message}`);
+      }
+
       return {
         url: `http://localhost:${process.env.PORT || 3001}/output/${fileName}`,
         path: filePath,
         hasAudio: probe.hasAudio,
         duration: probe.duration,
         audioCodec: probe.audioCodec,
-        engine: useOmni ? 'omni-flash' : 'veo'
+        engine: useOmni ? 'omni-flash' : 'veo',
+        thumbnail
       };
     } catch (error) {
       console.error('[GeminiService] Error en generateVideoClip:', error.message);
