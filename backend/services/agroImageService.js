@@ -7,45 +7,45 @@ const productContextService = require('./productContextService');
 const NEWS_TEMPLATES = [
   {
     id: 'editorial-bottom',
-    prompt: (titulo, footerLine) => `Create a professional Instagram post image (1:1 square, 1080x1080px) for a news article.
-DESIGN: Square 1:1. Use the reference image as main visual. Semi-transparent dark gradient on the BOTTOM third.
+    prompt: (titulo, footerLine) => `Create a professional Instagram post image (1:1 square, 1080x1080px) for an agricultural news article.
+DESIGN: Square 1:1. Background: original editorial scene of Almería greenhouse fields / Mediterranean agriculture (no real-person portraits). Semi-transparent dark gradient on the BOTTOM third.
 Headline in white bold sans-serif over the dark area: "${titulo}". Green/teal accent bar ABOVE the headline.${footerLine}
 Clean editorial/news aesthetic. Text fully readable. Polished social media composition.`
   },
   {
     id: 'magazine-cover',
-    prompt: (titulo, footerLine) => `Create a bold magazine-cover style Instagram post (1:1, 1080x1080px).
-DESIGN: Reference image as full-bleed background with slight cinematic grade. Large stacked headline in the CENTER/UPPER half in heavy white typography with soft shadow: "${titulo}".
+    prompt: (titulo, footerLine) => `Create a bold magazine-cover style Instagram post (1:1, 1080x1080px) about agriculture.
+DESIGN: Full-bleed agricultural background (fields, greenhouses) with slight cinematic grade — no identifiable people. Large stacked headline in the CENTER/UPPER half in heavy white typography with soft shadow: "${titulo}".
 Thin green accent line under the title. Minimal chrome, high-impact cover look.${footerLine}
 No clutter. Premium agricultural magazine vibe.`
   },
   {
     id: 'split-panel',
     prompt: (titulo, footerLine) => `Create a split-panel Instagram post (1:1, 1080x1080px) for agricultural news.
-DESIGN: Left 55% = reference photo full bleed. Right 45% = solid dark green/teal panel with the headline in white bold text: "${titulo}".
+DESIGN: Left 55% = agricultural photo full bleed (crops/greenhouses, no faces). Right 45% = solid dark green/teal panel with the headline in white bold text: "${titulo}".
 Modern newspaper digital layout. Strong contrast. Clean sans-serif.${footerLine}
 Keep text fully readable on the panel side.`
   },
   {
     id: 'top-banner',
     prompt: (titulo, footerLine) => `Create an Instagram news post (1:1, 1080x1080px).
-DESIGN: Reference image fills the frame. A solid dark banner strip across the TOP with white headline: "${titulo}".
+DESIGN: Agricultural landscape fills the frame (no real-person portraits). A solid dark banner strip across the TOP with white headline: "${titulo}".
 Small green accent on the left edge of the banner. Contemporary broadcast-news look.${footerLine}
 Sharp, readable typography.`
   },
   {
     id: 'quote-focus',
     prompt: (titulo, footerLine) => `Create an Instagram post (1:1, 1080x1080px) with quote/impact style.
-DESIGN: Softened/desaturated reference image background. Large translucent dark card centered with headline: "${titulo}".
+DESIGN: Softened/desaturated agricultural background. Large translucent dark card centered with headline: "${titulo}".
 Accent quotation mark or green corner marks. Modern NGO/press release aesthetic.${footerLine}
-High readability, elegant spacing.`
+High readability, elegant spacing. No identifiable faces.`
   },
   {
     id: 'map-region',
     prompt: (titulo, footerLine) => `Create an Instagram post (1:1, 1080x1080px) with regional/Almería agricultural identity.
-DESIGN: Use reference image. Overlay subtle greenhouse/map texture in corners. Headline in lower third on dark frosted glass: "${titulo}".
+DESIGN: Greenhouse/field scene as background. Overlay subtle greenhouse/map texture in corners. Headline in lower third on dark frosted glass: "${titulo}".
 Warm Mediterranean light grade, green accents, sense of place (Andalusia / Almería).${footerLine}
-Professional and local.`
+Professional and local. No real-person portraits.`
   }
 ];
 
@@ -224,7 +224,9 @@ IMPORTANTE:
     console.log(`[AgroImage] Plantilla noticia: ${template.id}`);
     const prompt = template.prompt(titulo, footerLine);
 
-    const result = await geminiService.generateImage(prompt, referenceImages);
+    // 1:1 fijo para posts de noticia. Si Gemini bloquea la foto de referencia
+    // (p.ej. político / persona real → IMAGE_OTHER), generateImage reintenta sin ella.
+    const result = await geminiService.generateImage(prompt, referenceImages, '1:1');
     if (!result) throw new Error('Gemini no pudo generar la imagen de la noticia.');
     return result;
   }
@@ -232,15 +234,19 @@ IMPORTANTE:
   async _downloadNewsImage(imageUrl) {
     try {
       const outputDir = this._ensureOutputDir();
-      const fileName = `news_ref_${Date.now()}.png`;
-      const filePath = path.join(outputDir, fileName);
-
       const response = await fetch(imageUrl);
       if (!response.ok) return null;
 
       const buffer = Buffer.from(await response.arrayBuffer());
-      fs.writeFileSync(filePath, buffer);
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      let ext = 'jpg';
+      if (contentType.includes('png') || (buffer[0] === 0x89 && buffer[1] === 0x50)) ext = 'png';
+      else if (contentType.includes('webp') || (buffer[0] === 0x52 && buffer[1] === 0x49)) ext = 'webp';
+      else if (contentType.includes('gif') || (buffer[0] === 0x47 && buffer[1] === 0x49)) ext = 'gif';
+      else if (buffer[0] === 0xFF && buffer[1] === 0xD8) ext = 'jpg';
 
+      const filePath = path.join(outputDir, `news_ref_${Date.now()}.${ext}`);
+      fs.writeFileSync(filePath, buffer);
       return filePath;
     } catch (e) {
       console.warn('[AgroImageService] No se pudo descargar imagen de noticia:', e.message);

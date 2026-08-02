@@ -6,7 +6,7 @@ const http = require('http');
 const https = require('https');
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
-const RENDER_TIMEOUT_MS = 180000; // 3 minutos máximo por render
+const RENDER_TIMEOUT_MS = 300000; // 5 minutos máximo por render (4 clips + fuentes)
 
 /**
  * Genera un env limpio para child processes de Remotion.

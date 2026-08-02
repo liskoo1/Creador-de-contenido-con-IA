@@ -21,8 +21,12 @@ import React, { useMemo } from 'react';
 import type { Caption } from '@remotion/captions';
 import { createTikTokStyleCaptions } from '@remotion/captions';
 
-// ─── Google Fonts ───────────────────────────────────────────────────────────
-const { fontFamily: interFamily } = loadInter();
+// ─── Google Fonts (solo pesos/subsets usados → evita 100+ requests y timeouts) ─
+const { fontFamily: interFamily } = loadInter('normal', {
+  weights: ['400', '600', '700'],
+  subsets: ['latin', 'latin-ext'],
+  ignoreTooManyRequestsWarning: true,
+});
 
 const FONT_BODY = interFamily;
 

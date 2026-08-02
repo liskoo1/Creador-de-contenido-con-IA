@@ -345,6 +345,9 @@ Devuelve JSON:
               engine: 'veo-direct'
             };
             projectState.visuals.push(videoData.url);
+            // La imagen ancla del personaje ya no hace falta tras generar el clip final
+            this._cleanupFiles([singleLock, projectState.characterLock]);
+            projectState.characterLock = null;
             console.log(`[Swarm] ✅ Clip directo Veo listo (hasAudio=${videoData.hasAudio}).`);
           }
         } catch (err) { console.error(`[Swarm] Error Veo:`, err); }
@@ -588,7 +591,13 @@ Devuelve JSON:
               bgmUrl,
               bgmVolume
             });
-            this._cleanupFiles(intermediateFiles);
+            // Clips/imágenes de escena + character lock solo eran inputs del montaje final
+            this._cleanupFiles([
+              ...intermediateFiles,
+              characterLockPath,
+              projectState.characterLock
+            ]);
+            projectState.characterLock = null;
             projectState.visuals = projectState.video ? [projectState.video.url] : [];
             if (projectState.video) {
               projectState.video.bgm = track.fileName || null;
@@ -790,16 +799,25 @@ Devuelve JSON:
    */
   _cleanupFiles(urlsOrPaths = []) {
     let deleted = 0;
+    const seen = new Set();
     for (const urlOrPath of urlsOrPaths) {
       if (!urlOrPath || typeof urlOrPath !== 'string') continue;
       try {
-        let filePath = urlOrPath;
-        if (urlOrPath.startsWith('http')) {
-          const url = new URL(urlOrPath);
-          filePath = url.pathname;
+        let absolute;
+        // character lock y similares llegan como ruta absoluta en disco
+        if (path.isAbsolute(urlOrPath) && fs.existsSync(urlOrPath)) {
+          absolute = urlOrPath;
+        } else {
+          let filePath = urlOrPath;
+          if (urlOrPath.startsWith('http')) {
+            const url = new URL(urlOrPath);
+            filePath = url.pathname;
+          }
+          const relative = filePath.replace(/^\/output\//, '').replace(/^output\//, '');
+          absolute = path.join(OUTPUT_DIR, relative);
         }
-        const relative = filePath.replace(/^\/output\//, '').replace(/^output\//, '');
-        const absolute = path.join(OUTPUT_DIR, relative);
+        if (!absolute || seen.has(absolute)) continue;
+        seen.add(absolute);
         if (fs.existsSync(absolute)) {
           fs.unlinkSync(absolute);
           deleted++;

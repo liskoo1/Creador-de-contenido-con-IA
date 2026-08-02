@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "@remotion/captions": "4.0.454",
-    "@remotion/fonts": "^4.0.454",
-    "@remotion/google-fonts": "^4.0.457",
+    "@remotion/fonts": "4.0.454",
+    "@remotion/google-fonts": "4.0.454",
     "@remotion/media": "4.0.454",
     "@remotion/transitions": "4.0.454",
     "react": "^18.0.0",

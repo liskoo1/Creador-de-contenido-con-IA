@@ -79,14 +79,50 @@ class GeminiService {
   }
 
   /**
+   * Detecta mime type real por magic bytes (evita enviar JPEG etiquetado como PNG).
+   */
+  _detectImageMime(buffer, fallbackExt = '') {
+    if (buffer && buffer.length >= 3) {
+      if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return 'image/jpeg';
+      if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return 'image/png';
+      if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) return 'image/webp';
+      if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif';
+    }
+    const ext = String(fallbackExt || '').toLowerCase().replace('.', '');
+    if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+    if (ext === 'webp') return 'image/webp';
+    if (ext === 'gif') return 'image/gif';
+    return 'image/png';
+  }
+
+  /**
    * Genera una imagen usando prompt de texto y, opcionalmente, imágenes de referencia de marca.
    * @param {string} prompt - Descripción de la imagen a generar.
    * @param {Array} referenceImages - Imágenes de referencia de marca.
    * @param {string} aspectRatio - Formato deseado: '1:1', '9:16', '16:9', '4:5', etc.
    */
   async generateImage(prompt, referenceImages = [], aspectRatio = null) {
+    const result = await this._generateImageOnce(prompt, referenceImages, aspectRatio);
+    if (result) return result;
+
+    // IMAGE_OTHER / bloqueos frecuentes con fotos de personas reales en noticias:
+    // reintentar sin referencias y con prompt autónomo.
+    if (referenceImages && referenceImages.length > 0) {
+      console.warn('[GeminiService] Fallo con referencias (posible IMAGE_OTHER). Reintentando sin imagen de referencia...');
+      const fallbackPrompt = `${prompt}
+
+IMPORTANT FALLBACK RULES:
+- Do NOT recreate or likeness-match any real person from a photo.
+- Invent an original agricultural/editorial background (greenhouse fields, Almería landscape, produce market, abstract editorial texture).
+- Keep the headline text and footer exactly as requested.
+- Generate a complete polished Instagram image from scratch.`;
+      return await this._generateImageOnce(fallbackPrompt, [], aspectRatio);
+    }
+    return null;
+  }
+
+  async _generateImageOnce(prompt, referenceImages = [], aspectRatio = null) {
     try {
-      // Mapear el aspect ratio a una descripción verbal clara para el modelo
       const ratioDescriptions = {
         '1:1':  'perfectly square (1:1 ratio, same width and height)',
         '9:16': 'vertical portrait (9:16 ratio, much taller than wide, like an Instagram Story)',
@@ -106,7 +142,7 @@ class GeminiService {
         console.log(`\x1b[36m[GeminiService] Referencias adjuntas: ${referenceImages.map(r => r.description).join(', ')}\x1b[0m`);
       }
       console.log(`\x1b[36m[GeminiService] === FIN PROMPT ===\x1b[0m`);
-      
+
       const fileName = `image_${uuidv4()}.png`;
       const filePath = path.join(this.outputDir, fileName);
 
@@ -114,32 +150,54 @@ class GeminiService {
 
       if (referenceImages && referenceImages.length > 0) {
         console.log(`[GeminiService] Adjuntando ${referenceImages.length} referencias visuales:`);
-        contents.push({ text: "IMÁGENES DE REFERENCIA DE MARCA (ÚSALAS EXACTAMENTE):" });
+        contents.push({
+          text: 'REFERENCE IMAGES (use as visual inspiration for background/composition only; do not reproduce identifiable faces or likenesses of real people):'
+        });
         for (const ref of referenceImages) {
           if (fs.existsSync(ref.absolutePath)) {
             const imageData = fs.readFileSync(ref.absolutePath);
-            const ext = path.extname(ref.absolutePath).toLowerCase().replace('.', '');
-            const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
-            contents.push({ text: `[REFERENCIA: ${ref.description}]` });
+            const mimeType = this._detectImageMime(imageData, path.extname(ref.absolutePath));
+            console.log(`[GeminiService]   - ${ref.description} (${mimeType}, ${imageData.length} bytes)`);
+            contents.push({ text: `[REFERENCE: ${ref.description}]` });
             contents.push({ inlineData: { data: imageData.toString('base64'), mimeType } });
           }
         }
       }
 
-      contents.push({ text: `IMAGEN A GENERAR: ${finalPrompt}` });
+      contents.push({ text: `GENERATE THIS IMAGE NOW: ${finalPrompt}` });
+
+      const imageConfig = { imageSize: '1K' };
+      if (aspectRatio && ratioDescriptions[aspectRatio]) {
+        imageConfig.aspectRatio = aspectRatio;
+      }
 
       const response = await this.ai.models.generateContent({
-        model: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image-preview',
+        model: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image',
         contents: contents,
+        config: {
+          responseModalities: ['TEXT', 'IMAGE'],
+          imageConfig,
+        },
       });
-      
+
       if (!response.candidates || response.candidates.length === 0) {
-        console.error("[GeminiService] La IA no devolvió ningún candidato.");
+        console.error('[GeminiService] La IA no devolvió ningún candidato.');
         return null;
       }
 
-      const part = response.candidates[0].content.parts.find(p => p.inlineData);
-      
+      const candidate = response.candidates[0];
+      const parts = candidate?.content?.parts;
+      if (!parts || !Array.isArray(parts)) {
+        console.error(
+          '[GeminiService] Respuesta sin parts de imagen.',
+          `finishReason=${candidate?.finishReason || 'unknown'}`,
+          candidate?.safetyRatings ? JSON.stringify(candidate.safetyRatings) : ''
+        );
+        return null;
+      }
+
+      const part = parts.find(p => p.inlineData);
+
       if (part && part.inlineData) {
         fs.writeFileSync(filePath, Buffer.from(part.inlineData.data, 'base64'));
         return {
@@ -147,11 +205,11 @@ class GeminiService {
           path: filePath
         };
       }
-      
-      console.error("[GeminiService] La IA no devolvió ningún inlineData de imagen.");
+
+      console.error('[GeminiService] La IA no devolvió ningún inlineData de imagen.');
       return null;
     } catch (error) {
-      console.error("[GeminiService] Error en generateImage:", error.message);
+      console.error('[GeminiService] Error en generateImage:', error.message);
       return null;
     }
   }
@@ -303,7 +361,11 @@ class GeminiService {
       }
     };
 
-    console.log(`[GeminiService] Omni Flash interactions.create model=${model} ratio=${ratio} task=${task} sdk=@google/genai@2`);
+    let sdkVersion = 'unknown';
+    try {
+      sdkVersion = require(path.join(__dirname, '../node_modules/@google/genai/package.json')).version;
+    } catch (_) { /* ignore */ }
+    console.log(`[GeminiService] Omni Flash interactions.create model=${model} ratio=${ratio} task=${task} sdk=@google/genai@${sdkVersion}`);
     const interaction = await this.ai.interactions.create(params, {
       timeout: Number(process.env.GEMINI_VIDEO_TIMEOUT_MS || 600000)
     });

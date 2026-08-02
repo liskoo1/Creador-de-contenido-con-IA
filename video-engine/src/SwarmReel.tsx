@@ -21,9 +21,17 @@ import { loadFont as loadInter } from '@remotion/google-fonts/Inter';
 import { loadFont as loadPlayfair } from '@remotion/google-fonts/PlayfairDisplay';
 import React from 'react';
 
-// ─── Google Fonts ───────────────────────────────────────────────────────────
-const { fontFamily: interFamily } = loadInter();
-const { fontFamily: playfairFamily } = loadPlayfair();
+// ─── Google Fonts (solo pesos/subsets usados → evita 100+ requests y timeouts) ─
+const { fontFamily: interFamily } = loadInter('normal', {
+  weights: ['400', '600', '700'],
+  subsets: ['latin', 'latin-ext'],
+  ignoreTooManyRequestsWarning: true,
+});
+const { fontFamily: playfairFamily } = loadPlayfair('normal', {
+  weights: ['700'],
+  subsets: ['latin', 'latin-ext'],
+  ignoreTooManyRequestsWarning: true,
+});
 
 const FONT_TITLE = playfairFamily;
 const FONT_BODY = interFamily;
