@@ -325,23 +325,6 @@ app.post('/api/ai/suggest-idea', async (req, res) => {
  * Endpoints de Historial (NoSQL Store)
  */
 app.get('/api/posts', async (req, res) => {
-  const posts = postService.getAll();
-  const videoService = require('./services/videoService');
-
-  // Backfill de thumbnails para vídeos antiguos (archive sin preview)
-  for (const post of posts) {
-    if (!post.video?.url || post.video.thumbnail) continue;
-    try {
-      const thumb = await videoService.extractVideoThumbnail(post.video.url);
-      if (thumb?.url) {
-        post.video.thumbnail = thumb.url;
-        postService.update(post.id, { video: post.video });
-      }
-    } catch (e) {
-      console.warn(`[API] Thumbnail backfill falló para ${post.id}: ${e.message}`);
-    }
-  }
-
   res.json(postService.getAll());
 });
 
@@ -510,30 +493,20 @@ app.post('/api/publish/:id', async (req, res) => {
     : igCaption;
   const caption = igCaption || fbCaption;
 
-  const contentType = post.contentType || 'post';
-  const hasVideo = post.video && post.video.url;
+  const job = publishingService.resolvePublishJob(post);
   const publishOpts = { platforms: pending };
 
   try {
-    let result;
-    if (contentType === 'price-story' && post.visuals && post.visuals.length >= 1) {
-      result = await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption, {
-        ...publishOpts,
-        facebookAsPageStory: true
-      });
-
-    } else if (hasVideo && (contentType === 'video' || contentType === 'audio-reel' || contentType === 'reel')) {
-      result = await publishingService.publishViaBridge(post.video.url, 'reel', caption, fbCaption, publishOpts);
-
-    } else if (contentType === 'carousel' && post.visuals && post.visuals.length > 1) {
-      result = await publishingService.publishViaBridge(post.visuals, 'carousel', caption, fbCaption, publishOpts);
-
-    } else if (post.visuals && post.visuals.length >= 1) {
-      result = await publishingService.publishViaBridge(post.visuals[0], 'image', caption, fbCaption, publishOpts);
-
-    } else {
+    if (!job) {
       return res.status(400).json({ error: 'No hay contenido visual para publicar.' });
     }
+    const result = await publishingService.publishViaBridge(
+      job.path,
+      job.type,
+      job.type === 'story' ? (job.extra || 'IMAGE') : caption,
+      fbCaption,
+      { ...publishOpts, ...(job.options || {}) }
+    );
 
     const now = new Date().toISOString();
     const nextPublishedTo = { ...publishedTo };
@@ -917,22 +890,18 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
   const caption = igCaption || fbCaption || '';
 
   try {
-    if (post.video && post.video.url && (post.contentType === 'video' || post.contentType === 'audio-reel' || post.contentType === 'reel')) {
-      await publishingService.publishViaBridge(post.video.url, 'reel', caption, fbCaption);
-    } else if (post.visuals && post.visuals.length > 0) {
-      if (post.contentType === 'price-story') {
-        await publishingService.publishViaBridge(post.visuals[0], 'story', 'IMAGE', fbCaption, {
-          facebookAsPageStory: true
-        });
-      } else if (post.visuals.length > 1) {
-        await publishingService.publishViaBridge(post.visuals, 'carousel', caption, fbCaption);
-      } else {
-        await publishingService.publishViaBridge(post.visuals[0], 'image', caption, fbCaption);
-      }
-    } else {
+    const job = publishingService.resolvePublishJob(post);
+    if (!job) {
       botStateService.releaseApprovalPublishClaim(postId);
       return res.send(renderWebhookPage('error', 'No hay contenido visual/vídeo para publicar.'));
     }
+    await publishingService.publishViaBridge(
+      job.path,
+      job.type,
+      job.type === 'story' ? (job.extra || 'IMAGE') : caption,
+      fbCaption,
+      job.options || {}
+    );
 
     const now = new Date().toISOString();
     botStateService.markApprovalPublished(postId);

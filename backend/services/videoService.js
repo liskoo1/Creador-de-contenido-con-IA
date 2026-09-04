@@ -8,6 +8,30 @@ const https = require('https');
 // ─── Constantes ─────────────────────────────────────────────────────────────
 const RENDER_TIMEOUT_MS = 300000; // 5 minutos máximo por render (4 clips + fuentes)
 
+let cachedFfmpeg = undefined; // { bin, cwd } | null
+
+function resolveFfmpeg() {
+  if (cachedFfmpeg !== undefined) return cachedFfmpeg;
+
+  const candidates = [
+    process.env.FFMPEG_PATH,
+    path.resolve(__dirname, '../../video-engine/node_modules/@remotion/compositor-win32-x64-msvc/ffmpeg.exe'),
+    path.resolve(__dirname, '../../video-engine/node_modules/@remotion/compositor-darwin-x64/ffmpeg'),
+    path.resolve(__dirname, '../../video-engine/node_modules/@remotion/compositor-linux-x64/ffmpeg'),
+  ].filter(Boolean);
+
+  for (const bin of candidates) {
+    if (fs.existsSync(bin)) {
+      cachedFfmpeg = { bin, cwd: path.dirname(bin) };
+      console.log(`[VideoEngine] ffmpeg: ${bin}`);
+      return cachedFfmpeg;
+    }
+  }
+
+  cachedFfmpeg = { bin: 'ffmpeg', cwd: undefined };
+  return cachedFfmpeg;
+}
+
 /**
  * Genera un env limpio para child processes de Remotion.
  * Elimina --watch de NODE_OPTIONS para evitar crash del FSWatcher.
@@ -220,12 +244,13 @@ class VideoService {
     const thumbPath = path.join(path.dirname(abs), thumbName);
 
     try {
+      const ff = resolveFfmpeg();
       // Frame cercano al inicio (0.15s) para evitar frame negro
-      await execFileAsync('ffmpeg', [
+      await execFileAsync(ff.bin, [
         '-y', '-ss', '0.15', '-i', abs,
         '-frames:v', '1', '-q:v', '3',
         thumbPath
-      ], { timeout: 30000 });
+      ], { timeout: 30000, cwd: ff.cwd });
 
       if (!fs.existsSync(thumbPath) || fs.statSync(thumbPath).size < 100) {
         return null;
