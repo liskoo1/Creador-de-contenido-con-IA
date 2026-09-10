@@ -6,7 +6,7 @@ const http = require('http');
 const https = require('https');
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
-const RENDER_TIMEOUT_MS = 300000; // 5 minutos máximo por render (4 clips + fuentes)
+const RENDER_TIMEOUT_MS = 600000; // 10 min (4 escenas mixtas vídeo+imagen + bundle Remotion)
 
 let cachedFfmpeg = undefined; // { bin, cwd } | null
 
@@ -190,6 +190,12 @@ class VideoService {
         if (error) {
           console.error(`[VideoEngine] ❌ Error tras ${elapsed}s:`, error.message);
           if (stderr) console.error(`[VideoEngine] STDERR:\n${stderr.slice(-500)}`);
+          try {
+            if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+              fs.unlinkSync(outputPath);
+              console.warn(`[VideoEngine] 🗑️ MP4 incompleto eliminado: ${outputFilename}`);
+            }
+          } catch (_) { /* ignore */ }
           reject(error);
           return;
         }
@@ -334,6 +340,12 @@ class VideoService {
         if (error) {
           console.error(`[VideoEngine] ❌ Audio Reel error tras ${elapsed}s:`, error.message);
           if (stderr) console.error(`[VideoEngine] STDERR:\n${stderr.slice(-500)}`);
+          try {
+            if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+              fs.unlinkSync(outputPath);
+              console.warn(`[VideoEngine] 🗑️ MP4 incompleto eliminado: ${outputFilename}`);
+            }
+          } catch (_) { /* ignore */ }
           reject(error);
           return;
         }

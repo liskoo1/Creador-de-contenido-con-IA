@@ -380,13 +380,13 @@ app.post('/api/create', async (req, res) => {
   const projectId = uuidv4();
   projects.set(projectId, { id: projectId, status: 'processing', data: null });
 
-  // Timeout de workflow: 10 minutos máximo
-  const WORKFLOW_TIMEOUT_MS = 600000;
+  // Timeout de workflow: 25 min (clips Veo + imágenes + montaje Remotion)
+  const WORKFLOW_TIMEOUT_MS = 1500000;
   const timeoutHandle = setTimeout(() => {
     const project = projects.get(projectId);
     if (project && project.status === 'processing') {
-      console.error(`[API] ⏰ Workflow ${projectId} excedió el timeout de 10 min.`);
-      projects.set(projectId, { id: projectId, status: 'timeout', error: 'El workflow excedió el tiempo máximo de 10 minutos.' });
+      console.error(`[API] ⏰ Workflow ${projectId} excedió el timeout de 25 min.`);
+      projects.set(projectId, { id: projectId, status: 'timeout', error: 'El workflow excedió el tiempo máximo de 25 minutos.' });
     }
   }, WORKFLOW_TIMEOUT_MS);
 
