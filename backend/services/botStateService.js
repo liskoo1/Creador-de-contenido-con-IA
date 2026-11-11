@@ -3,6 +3,14 @@ const path = require('path');
 
 const STATE_PATH = path.join(__dirname, '../data/botState.json');
 
+const DEFAULT_EDITORIAL_BUDGET = {
+  maxDailyFeedPosts: 1,
+  maxMonthlyFeedPosts: 24,
+  allowNewsOnCreativeDays: false,
+  includePriceStoriesInFeedBudget: false,
+  protectAgroRoutines: true
+};
+
 /**
  * Servicio de persistencia para el estado del Bot de Auto-Pilot.
  * Garantiza que el estado sobrevive a reinicios del servidor Windows.
@@ -26,6 +34,7 @@ class BotStateService {
           { format: "video", mediaType: "image" },
           { format: "video", mediaType: "video" }
         ],
+        editorialBudget: { ...DEFAULT_EDITORIAL_BUDGET },
         currentMonth: null,
         schedule: [],
         pendingApproval: []
@@ -38,7 +47,14 @@ class BotStateService {
       return JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
     } catch (e) {
       console.error('[BotState] Error leyendo estado:', e.message);
-      return { isAutoPilotActive: false, adminEmail: '', currentMonth: null, schedule: [], pendingApproval: [] };
+      return {
+        isAutoPilotActive: false,
+        adminEmail: '',
+        currentMonth: null,
+        schedule: [],
+        pendingApproval: [],
+        editorialBudget: { ...DEFAULT_EDITORIAL_BUDGET }
+      };
     }
   }
 
@@ -46,8 +62,29 @@ class BotStateService {
     fs.writeFileSync(STATE_PATH, JSON.stringify(data, null, 2));
   }
 
+    getPlanningMode() {
+    const state = this._read();
+    return state.planningMode || 'monthly';
+  }
+
+  setPlanningMode(mode) {
+    if (mode !== 'monthly' && mode !== 'weekly') {
+      throw new Error("Modo de planificación inválido. Debe ser 'monthly' o 'weekly'.");
+    }
+    const state = this._read();
+    state.planningMode = mode;
+    this._write(state);
+    console.log(`[BotState] Modo de planificación actualizado a: ${mode}`);
+    return mode;
+  }
+
   getState() {
-    return this._read();
+    const state = this._read();
+    if (!state.editorialBudget) {
+      state.editorialBudget = this.getEditorialBudget();
+    }
+    state.planningMode = this.getPlanningMode();
+    return state;
   }
 
   isActive() {
@@ -87,10 +124,81 @@ class BotStateService {
   }
 
   /**
+   * Obtiene la configuración actual del presupuesto editorial.
+   * Si no ha sido configurado en disco, devuelve los valores por defecto.
+   */
+  getEditorialBudget() {
+    const state = this._read();
+    return {
+      ...DEFAULT_EDITORIAL_BUDGET,
+      ...(state.editorialBudget || {})
+    };
+  }
+
+  /**
+   * Actualiza el presupuesto editorial y lo persiste en disco.
+   * @param {object} budget 
+   * @returns {object} Presupuesto actualizado
+   */
+  updateEditorialBudget(budget) {
+    if (!budget || typeof budget !== 'object' || Array.isArray(budget)) {
+      throw new Error('El presupuesto editorial debe ser un objeto válido.');
+    }
+    const state = this._read();
+    const current = this.getEditorialBudget();
+    const next = { ...current };
+
+    if (budget.maxDailyFeedPosts !== undefined) {
+      const val = Number(budget.maxDailyFeedPosts);
+      if (Number.isFinite(val) && val >= 0) {
+        next.maxDailyFeedPosts = Math.floor(val);
+      }
+    }
+
+    if (budget.maxMonthlyFeedPosts !== undefined) {
+      const val = Number(budget.maxMonthlyFeedPosts);
+      if (Number.isFinite(val) && val >= 0) {
+        next.maxMonthlyFeedPosts = Math.floor(val);
+      }
+    }
+
+    if (typeof budget.allowNewsOnCreativeDays === 'boolean') {
+      next.allowNewsOnCreativeDays = budget.allowNewsOnCreativeDays;
+    } else if (budget.allowNewsOnCreativeDays !== undefined) {
+      next.allowNewsOnCreativeDays = Boolean(budget.allowNewsOnCreativeDays);
+    }
+
+    if (typeof budget.includePriceStoriesInFeedBudget === 'boolean') {
+      next.includePriceStoriesInFeedBudget = budget.includePriceStoriesInFeedBudget;
+    } else if (budget.includePriceStoriesInFeedBudget !== undefined) {
+      next.includePriceStoriesInFeedBudget = Boolean(budget.includePriceStoriesInFeedBudget);
+    }
+
+    state.editorialBudget = next;
+    this._write(state);
+    console.log(`[BotState] Presupuesto editorial actualizado:`, next);
+    return next;
+  }
+
+  /**
    * Guarda el calendario mensual generado por el Agente Planificador.
    * @param {string} month - Formato "YYYY-MM"
    * @param {Array} schedule - Array de objetos { day, hour, concept, format, aspectRatio, status }
    */
+
+  /**
+   * Guarda el calendario semanal generado por el Agente Planificador basado en métricas.
+   * @param {string} weekKey - Formato "W_YYYY-MM-DD" o identificador de semana
+   * @param {Array} schedule - Array de objetos { day, hour, concept, format, aspectRatio, status, ... }
+   */
+  setWeeklySchedule(weekKey, schedule) {
+    const state = this._read();
+    state.currentWeek = weekKey;
+    state.schedule = schedule;
+    this._write(state);
+    console.log(`[BotState] Calendario semanal ${weekKey} guardado (${schedule.length} entradas).`);
+  }
+
   setMonthlySchedule(month, schedule) {
     const state = this._read();
     state.currentMonth = month;

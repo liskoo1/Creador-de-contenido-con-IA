@@ -69,6 +69,8 @@ class GeminiService {
           temperature: config.temperature || 0.7,
           topP: 0.9,
           topK: 40,
+          ...(config.maxOutputTokens ? { maxOutputTokens: config.maxOutputTokens } : {}),
+          ...(config.responseMimeType ? { responseMimeType: config.responseMimeType } : {})
         }
       });
       return response.text;

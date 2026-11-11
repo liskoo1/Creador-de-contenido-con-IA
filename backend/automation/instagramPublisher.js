@@ -57,7 +57,7 @@ class InstagramPublisher {
       throw new Error('Meta no puede acceder a URLs de "localhost". Configura SERVER_URL en el archivo .env con una URL pública (ej: ngrok).');
     }
 
-    console.log(`[Instagram] Intentando publicar. ID Cuenta: "${accountId}", Token (recortado): "${accessToken.substring(0, 10)}..."`);
+    console.log(`[Instagram] Intentando publicar. ID Cuenta: "${accountId}", Token: [CONFIGURADO]`);
 
     try {
       const isIgToken = accessToken.startsWith('IG');
@@ -398,6 +398,90 @@ class InstagramPublisher {
     } catch (error) {
       console.error('[Instagram] Error en carrusel:', error.message);
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Obtiene los Insights de una publicación en Instagram Graph API v25.0.
+   * @param {string} mediaId - ID de la publicación en Meta/Instagram.
+   * @returns {Promise<object>} - Resultado con métricas o indicador de mock/error.
+   */
+  async getMediaInsights(mediaId) {
+    const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
+
+    if (!accessToken) {
+      console.warn('[Instagram] Credenciales de Meta no configuradas. Insights simulados (mock).');
+      return {
+        success: false,
+        mock: true,
+        message: 'Credenciales de Meta no configuradas.'
+      };
+    }
+
+    if (!mediaId) {
+      return {
+        success: false,
+        error: 'Media ID no proporcionado.'
+      };
+    }
+
+    try {
+      const isIgToken = accessToken.startsWith('IG');
+      const baseUrl = isIgToken ? 'https://graph.instagram.com' : 'https://graph.facebook.com';
+      const url = `${baseUrl}/v25.0/${mediaId}/insights?metric=impressions,reach,saved,total_interactions&access_token=${accessToken}`;
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.error) {
+        return {
+          success: false,
+          error: data.error.message || 'Error en Meta Graph API'
+        };
+      }
+
+      // Estructura base con valores null para métricas no disponibles
+      const metrics = {
+        impressions: null,
+        reach: null,
+        saved: null,
+        total_interactions: null
+      };
+
+      if (Array.isArray(data.data)) {
+        for (const item of data.data) {
+          if (!item || !item.name) continue;
+          let val = null;
+
+          if (Array.isArray(item.values) && item.values.length > 0) {
+            const v = item.values[0]?.value;
+            if (v !== undefined && v !== null) val = Number(v);
+          } else if (item.total_value && typeof item.total_value === 'object') {
+            const v = item.total_value.value;
+            if (v !== undefined && v !== null) val = Number(v);
+          } else if (item.value !== undefined && item.value !== null) {
+            val = Number(item.value);
+          }
+
+          if (val !== null && !Number.isNaN(val)) {
+            metrics[item.name] = val;
+          } else {
+            metrics[item.name] = null;
+          }
+        }
+      }
+
+      return {
+        success: true,
+        mediaId,
+        metrics
+      };
+    } catch (error) {
+      console.error('[Instagram] Error consultando insights:', error.message);
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 }

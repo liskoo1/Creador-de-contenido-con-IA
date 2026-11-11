@@ -60,8 +60,9 @@ class ApprovalGateway {
       return;
     }
 
-    const approveUrl = `${serverUrl}/api/webhooks/approve/${post.id}`;
-    const rejectUrl = `${serverUrl}/api/webhooks/reject/${post.id}`;
+    const token = post.approvalToken || '';
+    const approveUrl = `${serverUrl}/api/webhooks/approve/${post.id}?token=${encodeURIComponent(token)}`;
+    const rejectUrl = `${serverUrl}/api/webhooks/reject/${post.id}?token=${encodeURIComponent(token)}`;
 
     const fbCopy = post.content?.facebook?.copy || post.content?.text || '';
     const igCopy = post.content?.instagram?.copy || '';

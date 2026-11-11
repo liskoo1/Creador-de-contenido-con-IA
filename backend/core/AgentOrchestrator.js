@@ -34,7 +34,41 @@ class AgentOrchestrator {
     this.maxRetries = 3;
   }
 
-  async runFullWorkflow(briefing, brandContext, contentType, mediaType, aspectRatio = '1:1', externalReferences = [], refMode = 'reference', engineMode = 'remotion', imageModel = 'google', projectId = null) {
+
+  _resolveMediaProviders(imageModel = 'default', videoProvider = null) {
+    const envMedia = (process.env.MEDIA_PROVIDER || '').trim().toLowerCase();
+    const envImage = (process.env.IMAGE_PROVIDER || '').trim().toLowerCase();
+    const envVideo = (process.env.VIDEO_PROVIDER || '').trim().toLowerCase();
+
+    let resolvedImage = imageModel;
+    if (!resolvedImage || resolvedImage === 'default') {
+      if (envMedia === 'poe' || envImage === 'poe') {
+        resolvedImage = 'poe';
+      } else if (envMedia === 'openai' || envImage === 'openai') {
+        resolvedImage = 'openai';
+      } else {
+        resolvedImage = 'google';
+      }
+    }
+
+    let resolvedVideo = videoProvider;
+    if (!resolvedVideo || resolvedVideo === 'default') {
+      if (envMedia === 'poe' || envVideo === 'poe') {
+        resolvedVideo = 'poe';
+      } else if (envMedia === 'google' || envVideo === 'google') {
+        resolvedVideo = 'google';
+      } else {
+        resolvedVideo = (resolvedImage === 'poe' ? 'poe' : 'google');
+      }
+    }
+
+    return { resolvedImage, resolvedVideo };
+  }
+
+  async runFullWorkflow(briefing, brandContext, contentType, mediaType, aspectRatio = '1:1', externalReferences = [], refMode = 'reference', engineMode = 'remotion', imageModel = 'google', projectId = null, videoProvider = null) {
+    const { resolvedImage, resolvedVideo } = this._resolveMediaProviders(imageModel, videoProvider);
+    imageModel = resolvedImage;
+    const resolvedVideoProvider = resolvedVideo;
     let projectState = {
       briefing,
       brandContext,
@@ -159,23 +193,11 @@ class AgentOrchestrator {
       console.warn(`[Swarm] ⚠️ Se detectaron URLs pero no se pudo extraer contenido. El contenido puede no reflejar la URL.`);
     }
 
-    // --- FASE 0.5: HASHTAGS TRENDING CON GROUNDING ---
+    // Etiquetas temáticas: Google Search no aporta métricas de Instagram.
     const productMeta = productContextService.getMetadata();
     const productIndustry = productMeta.industry || '';
     const productName = productMeta.productName || '';
-    let trendingHashtagsContext = '';
-
-    try {
-      console.log(`[Swarm] Buscando hashtags trending para "${productIndustry}" con Grounding...`);
-      const hashtagQuery = `hashtags más populares y virales ahora en Instagram para ${productIndustry}${productName ? ' ' + productName : ''}. Busca los hashtags con mayor volumen y engagement actual para contenido de marketing.`;
-      const hashtagResearch = await geminiService.generateTextWithGrounding(hashtagQuery, process.env.GEMINI_TEXT_GROUNDING_MODEL || 'gemini-3-flash-preview', { temperature: 0.4 });
-      if (hashtagResearch && hashtagResearch.length > 30) {
-        trendingHashtagsContext = `\n\n🔥 HASHTAGS TRENDING EN INSTAGRAM (datos de Google Search en tiempo real):\n${hashtagResearch}\nINSTRUCCIÓN: Selecciona los 10-15 hashtags más relevantes y virales de esta lista para tu contenido. Combina hashtags de alto volumen con hashtags de nicho específicos al tema del post. NO uses todos, filtra los mejores.`;
-        console.log(`[Swarm] Hashtags trending obtenidos (${hashtagResearch.length} chars).`);
-      }
-    } catch (err) {
-      console.warn(`[Swarm] No se pudieron obtener hashtags trending: ${err.message}`);
-    }
+    const trendingHashtagsContext = '\n\nUsa como máximo cinco hashtags específicos del tema y la marca. No afirmes que son virales ni inventes volumen o engagement.';
 
     // --- FASE 0.75: ESTRATEGIA (marketing-ideas) ---
     let strategyContext = '';
@@ -243,7 +265,7 @@ Devuelve JSON:
         writingPrompt += `\n\nINSTRUCCIÓN: El copy que generes DEBE estar basado al 100% en la información anterior. No inventes datos. Adapta el tono al formato ${contentType}.`;
       }
 
-      let writingContext = { brandSummary: cleanBrandContext };
+      let writingContext = { brandSummary: cleanBrandContext, instagramFormat: contentType };
 
       const visionRefs = (externalReferences || []).filter(ref => ref.mode === 'vision');
       if (visionRefs.length > 0) {
@@ -270,7 +292,7 @@ Devuelve JSON:
     }));
 
     // Obtenemos TODOS los activos de imagen de la marca para tener un pool completo
-    const brandAssets = knowledgeService.getImageAssets().map(a => ({ 
+    const brandAssets = knowledgeService.getImageAssets(null, { excludeRoles: ['website-screenshot'] }).map(a => ({ 
       absolutePath: a.absolutePath, 
       description: a.description 
     }));
@@ -315,7 +337,7 @@ Devuelve JSON:
         };
         let singleLock = null;
         if (brandChar) {
-          singleLock = await this._generateCharacterLock(brandChar, aspectRatio);
+          singleLock = await this._generateCharacterLock(brandChar, aspectRatio, imageModel);
           projectState.characterLock = singleLock;
         }
         const singleDirective = {
@@ -427,7 +449,7 @@ Devuelve JSON:
         const needsPerson = plannedScenes.some(s => s.spokenDialog) || !!characterProfile;
         if (needsPerson && characterProfile) {
           emitProgress('planning', 'Generando character lock...');
-          characterLockPath = await this._generateCharacterLock(characterProfile, aspectRatio);
+          characterLockPath = await this._generateCharacterLock(characterProfile, aspectRatio, imageModel);
           projectState.characterLock = characterLockPath;
         }
 
@@ -733,7 +755,7 @@ Devuelve JSON:
     console.log(`[Swarm] Fase 2: 🖼️ Generando imágenes para ${audioData.scenes.length} escenas...`);
     const scenesWithImages = [];
 
-    const brandAssets = knowledgeService.getImageAssets().map(a => ({
+    const brandAssets = knowledgeService.getImageAssets(null, { excludeRoles: ['website-screenshot'] }).map(a => ({
       absolutePath: a.absolutePath,
       description: a.description
     }));
@@ -1063,10 +1085,23 @@ RULES: Keep spokenDialog exact if present. Respect CHARACTER LOCK and visualDire
   /**
    * Genera imagen ancla del personaje para consistencia entre clips Veo.
    */
-  async _generateCharacterLock(characterProfile, aspectRatio = '9:16') {
+  async _generateCharacterLock(characterProfile, aspectRatio = '9:16', imageModel = 'google') {
     try {
       const prompt = `Photorealistic portrait reference sheet of: ${characterProfile}. Neutral background, soft studio light, looking at camera, shoulders-up, consistent identity reference photo, no text, no logos.`;
-      const img = await geminiService.generateImage(prompt, [], aspectRatio === '9:16' ? '9:16' : '1:1');
+      let img = null;
+      if (imageModel === 'poe') {
+        const poeService = require('../services/poeService');
+        img = await poeService.generateImage({
+          prompt,
+          aspectRatio: aspectRatio === '9:16' ? '9:16' : '1:1',
+          imageSize: '1K'
+        });
+      } else if (imageModel === 'openai') {
+        const openaiService = require('../services/openaiService');
+        img = await openaiService.generateImage(prompt, []);
+      } else {
+        img = await geminiService.generateImage(prompt, [], aspectRatio === '9:16' ? '9:16' : '1:1');
+      }
       if (img?.path && fs.existsSync(img.path)) {
         console.log(`[Remotion] 🔒 Character lock guardado: ${img.path}`);
         return img.path;

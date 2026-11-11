@@ -1,13 +1,19 @@
 /* ============================================
-   PRODUCT CONTEXT EDITOR
+   PRODUCT CONTEXT EDITOR & BIZ ANALYZER
    ============================================ */
 
 .product-context-section {
-  border: 1px solid rgba(0, 243, 255, 0.15);
+  border: 1px solid rgba(0, 243, 255, 0.2);
   border-radius: 12px;
   background: rgba(0, 243, 255, 0.03);
-  padding: 16px;
+  padding: 14px;
   margin-bottom: 8px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 100%;
+  height: auto;
+  min-height: min-content;
+  overflow: visible;
 }
 
 .product-context-header {
@@ -41,10 +47,13 @@
   display: none;
   flex-direction: column;
   gap: 0;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .product-context-body.open {
   display: flex;
+  height: auto;
 }
 
 .product-context-status {
@@ -72,18 +81,24 @@
   flex-direction: column;
   gap: 8px;
   margin-bottom: 12px;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .product-meta-row {
   display: flex;
   gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .product-meta-field {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  box-sizing: border-box;
 }
 
 .product-meta-field label {
@@ -95,6 +110,7 @@
 }
 
 .product-meta-field input {
+  box-sizing: border-box;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
   color: #e0e0e0;
@@ -103,7 +119,7 @@
   padding: 6px 10px;
   border-radius: 6px;
   outline: none;
-  transition: border-color 0.3s;
+  transition: all 0.3s ease;
   width: 100%;
 }
 
@@ -112,11 +128,135 @@
   box-shadow: 0 0 8px rgba(0, 243, 255, 0.15);
 }
 
+.biz-analyze-btn {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 4px 0 8px 0;
+  height: 34px;
+  background: linear-gradient(135deg, rgba(0, 243, 255, 0.12), rgba(112, 0, 255, 0.22));
+  border: 1px solid var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.25s ease;
+}
+
+.biz-analyze-btn:hover {
+  background: linear-gradient(135deg, rgba(0, 243, 255, 0.25), rgba(112, 0, 255, 0.38));
+  box-shadow: 0 0 14px rgba(0, 243, 255, 0.4);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.biz-analyze-btn:active {
+  transform: translateY(0);
+}
+
+.biz-analyze-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.biz-progress-container {
+  display: none;
+  box-sizing: border-box;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 243, 255, 0.25);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 8px 0 10px 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.biz-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--accent);
+}
+
+.biz-progress-bar-wrap {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.biz-progress-bar-fill {
+  height: 100%;
+  width: 15%;
+  background: linear-gradient(90deg, var(--accent), #7000ff);
+  transition: width 0.4s ease;
+  border-radius: 3px;
+}
+
+.biz-cancel-btn {
+  background: transparent;
+  border: 1px solid #ff5252;
+  color: #ff5252;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.biz-cancel-btn:hover {
+  background: rgba(255, 82, 82, 0.15);
+}
+
+.biz-analysis-alert {
+  display: none;
+  box-sizing: border-box;
+  width: 100%;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.biz-analysis-alert.success {
+  display: block;
+  background: rgba(0, 230, 118, 0.12);
+  border: 1px solid rgba(0, 230, 118, 0.4);
+  color: #00e676;
+}
+
+.biz-analysis-alert.error {
+  display: block;
+  background: rgba(255, 82, 82, 0.12);
+  border: 1px solid rgba(255, 82, 82, 0.4);
+  color: #ff5252;
+}
+
 .product-context-editor {
   position: relative;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .product-context-editor .editor-toolbar {
+  box-sizing: border-box;
+  width: 100%;
   display: flex;
   gap: 4px;
   padding: 6px 8px;
@@ -144,15 +284,13 @@
   border-color: var(--accent);
 }
 
-.product-context-editor .toolbar-btn.active {
-  background: rgba(0, 243, 255, 0.15);
-  color: var(--accent);
-}
-
 .product-context-textarea {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 243, 255, 0.25) rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
   width: 100%;
-  min-height: 150px;
-  max-height: 300px;
+  min-height: 140px;
+  max-height: 280px;
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid var(--border);
   border-radius: 0 0 8px 8px;
@@ -160,10 +298,11 @@
   font-family: 'Outfit', sans-serif;
   font-size: 0.8rem;
   line-height: 1.6;
-  padding: 12px;
+  padding: 10px 12px;
   resize: vertical;
   outline: none;
-  transition: border-color 0.3s;
+  transition: all 0.3s ease;
+  overflow-y: auto;
 }
 
 .product-context-textarea:focus {
@@ -172,14 +311,101 @@
 }
 
 .product-context-textarea::placeholder {
-  color: #444;
+  color: #555;
   font-style: italic;
+}
+
+.product-context-textarea::-webkit-scrollbar {
+  width: 4px;
+}
+
+.product-context-textarea::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.product-context-textarea::-webkit-scrollbar-thumb {
+  background: rgba(0, 243, 255, 0.25);
+  border-radius: 4px;
+}
+
+.product-context-textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+.product-char-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  text-align: right;
+  margin-top: 4px;
+}
+
+/* Panel de Capturas Web */
+.biz-captures-panel {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 10px 0;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 243, 255, 0.2);
+  border-radius: 8px;
+}
+
+.biz-captures-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 1px;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.biz-captures-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.biz-capture-card {
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.biz-capture-thumb {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #111;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.biz-capture-thumb:hover {
+  transform: scale(1.02);
+  box-shadow: 0 0 10px rgba(0, 243, 255, 0.4);
+}
+
+.biz-capture-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  color: #aaa;
 }
 
 .product-context-actions {
   display: flex;
   gap: 8px;
   margin-top: 10px;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .product-context-save-btn {
@@ -192,13 +418,16 @@
   cursor: pointer;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.65rem;
+  font-weight: 700;
   letter-spacing: 1.5px;
   transition: all 0.3s;
+  box-sizing: border-box;
 }
 
 .product-context-save-btn:hover {
   background: rgba(0, 243, 255, 0.2);
   box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
+  color: #fff;
 }
 
 .product-context-save-btn.saving {
@@ -215,10 +444,12 @@
   opacity: 0.7;
 }
 
-.product-char-count {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.55rem;
-  color: var(--text-dim);
-  text-align: right;
-  margin-top: 4px;
+@keyframes fieldFlashGlow {
+  0% { border-color: #00f3ff; box-shadow: 0 0 14px rgba(0, 243, 255, 0.7); background: rgba(0, 243, 255, 0.15); }
+  50% { border-color: #00f3ff; box-shadow: 0 0 8px rgba(0, 243, 255, 0.4); background: rgba(0, 243, 255, 0.08); }
+  100% { border-color: var(--border); box-shadow: none; background: rgba(255, 255, 255, 0.05); }
+}
+
+.field-flash-highlight {
+  animation: fieldFlashGlow 2s ease-out;
 }

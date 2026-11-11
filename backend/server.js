@@ -28,6 +28,8 @@ const publishingService = require('./services/publishingService');
 const agroDataService = require('./services/agroDataService');
 const agroImageService = require('./services/agroImageService');
 const productContextService = require('./services/productContextService');
+const instagramPublisher = require('./automation/instagramPublisher');
+const experimentService = require('./services/experimentService');
 
 /** Candado en memoria: evita doble publicación concurrente del mismo postId (doble clic email). */
 const activePublishLocks = new Set();
@@ -55,6 +57,11 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/api/instagram', require('./routes/instagram')({
+  generateText: (prompt) => geminiService.generateText(prompt, process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash'),
+  getProductContext: () => productContextService.getAsPromptSection()
+}));
 // Middleware para bypass de ngrok interstitial y Content-Type correcto en archivos de output
 app.use('/output', cors(), (req, res, next) => {
   // Forzar Content-Type correcto basado en la extensión del archivo
@@ -178,8 +185,10 @@ app.delete('/api/knowledge/:type/:id', (req, res) => {
 });
 
 /**
- * Endpoints de Contexto de Producto
+ * Endpoints de Contexto de Producto y Análisis Web
  */
+app.use('/api/product-context', require('./routes/businessContext'));
+
 app.get('/api/product-context', (req, res) => {
   res.json(productContextService.get());
 });
@@ -333,6 +342,213 @@ app.delete('/api/posts/:id', (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * ============================================
+ * ENDPOINTS DE MÉTRICAS (MET-001)
+ * ============================================
+ */
+
+/**
+ * GET /api/posts/:id/metrics
+ * Devuelve el post y sus métricas actuales (o null si no existen).
+ */
+app.get('/api/posts/:id/metrics', (req, res) => {
+  const post = postService.getAll().find(p => p.id === req.params.id);
+  if (!post) {
+    return res.status(404).json({ error: 'Post no encontrado.' });
+  }
+
+  res.json({
+    success: true,
+    postId: post.id,
+    metrics: post.metrics || null,
+    post
+  });
+});
+
+/**
+ * POST /api/posts/:id/metrics/sync
+ * Sincroniza métricas remotas desde Instagram Graph API v25.0 vía instagramPublisher.
+ */
+app.post('/api/posts/:id/metrics/sync', async (req, res) => {
+  const post = postService.getAll().find(p => p.id === req.params.id);
+  if (!post) {
+    return res.status(404).json({ error: 'Post no encontrado.' });
+  }
+
+  const mediaId = post.publishedPlatformIds?.instagram;
+  if (!mediaId) {
+    return res.status(400).json({
+      error: 'El post no cuenta con un ID de Instagram publicado (publishedPlatformIds.instagram).'
+    });
+  }
+
+  try {
+    const result = await instagramPublisher.getMediaInsights(mediaId);
+
+    if (result.mock) {
+      return res.status(200).json({
+        success: false,
+        mock: true,
+        message: result.message || 'Credenciales de Meta no configuradas.'
+      });
+    }
+
+    if (!result.success) {
+      return res.status(502).json({
+        success: false,
+        error: result.error || 'Error al obtener métricas de Instagram Graph API.'
+      });
+    }
+
+    const metricsPayload = {
+      ...result.metrics,
+      origin: 'api',
+      fetchedAt: new Date().toISOString()
+    };
+
+    const updatedPost = postService.updateMetrics(post.id, metricsPayload);
+    return res.json({
+      success: true,
+      postId: post.id,
+      metrics: updatedPost.metrics,
+      post: updatedPost
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * POST /api/posts/:id/metrics/import
+ * Permite importar manualmente métricas con validación estricta (no negativos, distinción null vs 0).
+ */
+app.post('/api/posts/:id/metrics/import', (req, res) => {
+  const post = postService.getAll().find(p => p.id === req.params.id);
+  if (!post) {
+    return res.status(404).json({ error: 'Post no encontrado.' });
+  }
+
+  const body = req.body || {};
+  const inputMetrics = (body.metrics && typeof body.metrics === 'object' && !Array.isArray(body.metrics))
+    ? body.metrics
+    : body;
+
+  if (!inputMetrics || typeof inputMetrics !== 'object' || Array.isArray(inputMetrics)) {
+    return res.status(400).json({ error: 'Cuerpo de petición inválido para métricas.' });
+  }
+
+  const metaKeys = new Set(['origin', 'fetchedAt', '_id']);
+  const cleanedMetrics = {};
+  let validKeysCount = 0;
+
+  for (const [key, rawVal] of Object.entries(inputMetrics)) {
+    if (metaKeys.has(key)) continue;
+
+    // Distinción estricta: null o undefined se preservan como null
+    if (rawVal === null || rawVal === undefined) {
+      cleanedMetrics[key] = null;
+      validKeysCount++;
+      continue;
+    }
+
+    // Rechazo de tipos inválidos (boolean, array, object)
+    if (typeof rawVal === 'boolean' || Array.isArray(rawVal) || (typeof rawVal === 'object' && rawVal !== null)) {
+      return res.status(400).json({
+        error: `El campo '${key}' tiene un tipo inválido. Debe ser un número no negativo o null.`
+      });
+    }
+
+    const num = Number(rawVal);
+    if (Number.isNaN(num) || !Number.isFinite(num)) {
+      return res.status(400).json({
+        error: `El campo '${key}' debe ser un número válido o null.`
+      });
+    }
+
+    // Validación de valor no negativo
+    if (num < 0) {
+      return res.status(400).json({
+        error: `El campo '${key}' no puede ser negativo (valor recibido: ${rawVal}).`
+      });
+    }
+
+    // Preserva numéricamente 0 como 0
+    cleanedMetrics[key] = num;
+    validKeysCount++;
+  }
+
+  if (validKeysCount === 0) {
+    return res.status(400).json({ error: 'No se enviaron campos válidos de métricas para importar.' });
+  }
+
+  const metricsPayload = {
+    ...cleanedMetrics,
+    origin: 'manual',
+    fetchedAt: new Date().toISOString()
+  };
+
+  const updatedPost = postService.updateMetrics(post.id, metricsPayload);
+  return res.json({
+    success: true,
+    postId: post.id,
+    metrics: updatedPost.metrics,
+    post: updatedPost
+  });
+});
+
+/**
+ * ============================================
+ * ENDPOINTS DE EXPERIMENTOS (EXP-001)
+ * ============================================
+ */
+
+/**
+ * GET /api/experiments
+ * Analiza posts evaluando formatos, distinción de métricas reales vs ausentes y SRR.
+ */
+app.get('/api/experiments', (req, res) => {
+  try {
+    const posts = postService.getAll();
+    const data = experimentService.analyzeExperiments(posts);
+    return res.json({ success: true, data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * POST /api/posts/:id/hypothesis
+ * Registra o actualiza la hipótesis editorial vinculada a un post.
+ */
+app.post('/api/posts/:id/hypothesis', (req, res) => {
+  const postId = req.params.id;
+  const body = req.body || {};
+
+  if (!body.angle || typeof body.angle !== 'string' || !body.angle.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: "El campo 'angle' es obligatorio y no puede estar vacío."
+    });
+  }
+
+  const allowedStatuses = ['active', 'validated', 'invalidated'];
+  if (body.status && !allowedStatuses.includes(body.status)) {
+    return res.status(400).json({
+      success: false,
+      error: `El campo 'status' debe ser uno de: ${allowedStatuses.join(', ')}.`
+    });
+  }
+
+  try {
+    const updatedPost = experimentService.setPostHypothesis(postId, body);
+    return res.json({ success: true, post: updatedPost });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/status/:id', (req, res) => res.json(projects.get(req.params.id) || {}));
 
 /**
@@ -452,6 +668,74 @@ app.post('/api/create-audio-reel', uploadAudio.single('audioFile'), async (req, 
  * Publicación manual desde el Frontend (Instagram y/o Facebook vía tokens .env)
  * Body opcional: { platforms: ['instagram'] | ['facebook'] | ['instagram','facebook'] }
  */
+/**
+ * Aplica de forma unificada y atómica el resultado de publicación a un post:
+ * - Registra en publishedTo las marcas de tiempo de las redes con éxito.
+ * - Registra en publishedPlatformIds los IDs devueltos por Meta.
+ * - Si todas las redes principales (IG y FB) quedan confirmadas, registra publishedAt.
+ * - Persiste en postService solo si hubo algún cambio exitoso.
+ */
+function applyPublishResult(post, result) {
+  const now = new Date().toISOString();
+  const prevPublishedTo = post.publishedTo || {};
+  const prevPlatformIds = post.publishedPlatformIds || {};
+
+  const nextPublishedTo = { ...prevPublishedTo };
+  const nextPublishedPlatformIds = { ...prevPlatformIds };
+
+  const supportedPlatforms = ['instagram', 'facebook'];
+  let anyPlatformSucceeded = false;
+
+  for (const p of supportedPlatforms) {
+    const pRes = result[p];
+    if (pRes?.success) {
+      if (!nextPublishedTo[p]) {
+        nextPublishedTo[p] = now;
+      }
+      if (pRes.postId) {
+        nextPublishedPlatformIds[p] = pRes.postId;
+      }
+      anyPlatformSucceeded = true;
+    }
+  }
+
+  const allCompleted = Boolean(nextPublishedTo.instagram && nextPublishedTo.facebook);
+
+  // Si ninguna plataforma solicitada tuvo éxito en este intento:
+  if (!result.success || !anyPlatformSucceeded) {
+    return {
+      success: false,
+      allOk: false,
+      partial: false,
+      allCompleted,
+      updatedPost: post,
+      nextPublishedTo: prevPublishedTo,
+      nextPublishedPlatformIds: prevPlatformIds
+    };
+  }
+
+  const updates = {
+    publishedTo: nextPublishedTo,
+    publishedPlatformIds: nextPublishedPlatformIds
+  };
+
+  if (allCompleted) {
+    updates.publishedAt = post.publishedAt || now;
+  }
+
+  const updatedPost = postService.update(post.id, updates) || { ...post, ...updates };
+
+  return {
+    success: result.success,
+    allOk: result.allOk,
+    partial: result.partial,
+    allCompleted,
+    updatedPost,
+    nextPublishedTo,
+    nextPublishedPlatformIds
+  };
+}
+
 app.post('/api/publish/:id', async (req, res) => {
   const postId = req.params.id;
   const post = postService.getAll().find(p => p.id === postId);
@@ -474,7 +758,8 @@ app.post('/api/publish/:id', async (req, res) => {
     return res.status(409).json({
       error: `Ya publicado en: ${already.join(', ')}.`,
       alreadyPublished: true,
-      publishedTo
+      publishedTo,
+      publishedPlatformIds: post.publishedPlatformIds || {}
     });
   }
 
@@ -508,24 +793,20 @@ app.post('/api/publish/:id', async (req, res) => {
       { ...publishOpts, ...(job.options || {}) }
     );
 
-    const now = new Date().toISOString();
-    const nextPublishedTo = { ...publishedTo };
-    if (result.instagram?.success) nextPublishedTo.instagram = now;
-    if (result.facebook?.success) nextPublishedTo.facebook = now;
+    const applied = applyPublishResult(post, result);
 
-    const bothDone = !!(nextPublishedTo.instagram && nextPublishedTo.facebook);
-    const updates = {
-      publishedTo: nextPublishedTo,
-      publishedAt: post.publishedAt || (result.success ? now : null)
-    };
-    postService.update(postId, updates);
-
-    if (bothDone) {
+    if (applied.allCompleted) {
       botStateService.markApprovalPublished(postId);
     }
 
     console.log(`\x1b[32m[API] Publicación [${pending.join('+')}]: IG=${result.instagram?.success ? 'OK' : (result.instagram?.skipped ? 'SKIP' : 'NO')} FB=${result.facebook?.success ? 'OK' : (result.facebook?.skipped ? 'SKIP' : 'NO')}\x1b[0m`);
-    res.json({ ...result, publishedTo: nextPublishedTo });
+    res.json({
+      ...result,
+      publishedTo: applied.nextPublishedTo,
+      publishedPlatformIds: applied.nextPublishedPlatformIds,
+      allCompleted: applied.allCompleted,
+      post: applied.updatedPost
+    });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   } finally {
@@ -581,7 +862,7 @@ app.post('/api/agro/generate-price-story', async (req, res) => {
     }
 
     const fecha = new Date(prices[0].Fecha).toLocaleDateString('es-ES', {
-      day: 'numeric', month: 'long', year: 'numeric'
+      day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Madrid'
     });
 
     const priceList = prices.map(p =>
@@ -680,7 +961,7 @@ app.post('/api/agro/auto-daily', async (req, res) => {
         const imageResult = await agroImageService.generatePriceCardImage(prices);
         if (imageResult) {
           const fecha = new Date(prices[0].Fecha).toLocaleDateString('es-ES', {
-            day: 'numeric', month: 'long', year: 'numeric'
+            day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Madrid'
           });
           const priceList = prices.map(p =>
             `${p.NombreProductoCompleto}: ${parseFloat(p.Precio).toFixed(2)} €/kg`
@@ -760,6 +1041,23 @@ app.post('/api/agro/auto-daily', async (req, res) => {
  * ============================================
  */
 
+app.get('/api/config/providers', (req, res) => {
+  const mediaProvider = (process.env.MEDIA_PROVIDER || 'poe').trim().toLowerCase();
+  const imageProvider = (process.env.IMAGE_PROVIDER || mediaProvider).trim().toLowerCase();
+  const videoProvider = (process.env.VIDEO_PROVIDER || mediaProvider).trim().toLowerCase();
+  res.json({
+    mediaProvider,
+    imageProvider,
+    videoProvider,
+    textModel: process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash'
+  });
+});
+
+app.get('/api/memory', (req, res) => {
+  const contentMemoryService = require('./services/contentMemoryService');
+  res.json(contentMemoryService.getRecentMemory());
+});
+
 app.get('/api/bot/state', (req, res) => {
   const state = botStateService.getState();
   state.isInstagramConnected = !!(process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_ACCOUNT_ID);
@@ -788,8 +1086,64 @@ app.post('/api/bot/formats', (req, res) => {
   res.json({ success: true, allowedFormats: formats });
 });
 
+app.get('/api/bot/planning-mode', (req, res) => {
+  res.json({ success: true, mode: botStateService.getPlanningMode() });
+});
+
+app.post('/api/bot/planning-mode', (req, res) => {
+  const { mode } = req.body;
+  try {
+    const updated = botStateService.setPlanningMode(mode);
+    res.json({ success: true, mode: updated });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/experiments/sync', async (req, res) => {
+  try {
+    const posts = postService.getAll();
+    const publishedWithIG = posts.filter(p => p.publishedPlatformIds && p.publishedPlatformIds.instagram);
+    let updatedCount = 0;
+
+    for (const post of publishedWithIG) {
+      try {
+        const mediaId = post.publishedPlatformIds.instagram;
+        const result = await instagramPublisher.getMediaInsights(mediaId);
+        if (result && result.success && result.metrics) {
+          const metricsPayload = {
+            ...result.metrics,
+            origin: 'api',
+            fetchedAt: new Date().toISOString()
+          };
+          postService.updateMetrics(post.id, metricsPayload);
+          updatedCount++;
+        }
+      } catch (err) {
+        console.warn(`[SyncMetrics] Error sincronizando post ${post.id}:`, err.message);
+      }
+    }
+
+    const refreshedPosts = postService.getAll();
+    const data = experimentService.analyzeExperiments(refreshedPosts);
+    return res.json({ success: true, updatedCount, totalChecked: publishedWithIG.length, data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.get('/api/bot/schedule', (req, res) => {
   res.json(botStateService.getSchedule());
+});
+
+
+app.post('/api/bot/force-plan-week', async (req, res) => {
+  try {
+    const result = await scheduler.forceWeeklyPlanning();
+    res.json({ success: true, result, schedule: botStateService.getSchedule() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/bot/force-plan', async (req, res) => {
@@ -854,15 +1208,49 @@ app.post('/api/bot/execute/:day/:index?', async (req, res) => {
   }
 });
 
-app.get('/api/webhooks/approve/:postId', async (req, res) => {
+app.all('/api/webhooks/approve/:postId', async (req, res) => {
   const { postId } = req.params;
-  console.log(`\x1b[32m[Webhook] ✅ Post ${postId} APROBADO por el administrador.\x1b[0m`);
 
   const post = postService.getAll().find(p => p.id === postId);
   if (!post) return res.send(renderWebhookPage('error', 'Post no encontrado.'));
 
-  // Anti-duplicado: ya publicado en el propio post
-  if (post.publishedAt) {
+  if (!post.approvalToken || req.query.token !== post.approvalToken) {
+    return res.status(403).send(renderWebhookPage('error', 'Acceso no autorizado: Token de aprobación inválido o ausente.'));
+  }
+
+  // Si es un escaneo GET desde correo que acepta HTML (sin confirmación explícita), mostrar pantalla de revisión segura sin publicar
+  const acceptsHtml = (req.headers.accept || '').includes('text/html');
+  const isDirectApi = !acceptsHtml || req.query.confirm === 'true' || req.query.immediate === 'true';
+  const isPostRequest = req.method === 'POST';
+
+  if (!isPostRequest && !isDirectApi) {
+    return res.send(renderReviewPage(post, req.query.token));
+  }
+
+  // Si se eligió aprobar para fecha programada diferida (sin publicar ahora)
+  const approvalMode = req.body?.mode || req.query?.mode;
+  if (approvalMode === 'scheduled') {
+    postService.update(postId, { status: 'approved', approvedAt: new Date().toISOString() });
+    botStateService.updateScheduleEntryByPostId(postId, { status: 'approved' });
+    console.log(`\x1b[32m[Webhook] 📅 Post ${postId} APROBADO para publicación programada diferida.\x1b[0m`);
+    return res.send(renderWebhookPage('approved', '¡Contenido aprobado exitosamente! Queda programado para publicarse en su fecha prevista.'));
+  }
+
+  console.log(`\x1b[32m[Webhook] ✅ Post ${postId} APROBADO por el administrador.\x1b[0m`);
+
+  const publishedTo = post.publishedTo || {};
+  const isAlreadyFullyPublished = Boolean(post.publishedAt || (publishedTo.instagram && publishedTo.facebook));
+
+  // Anti-duplicado: ya publicado completamente
+  if (isAlreadyFullyPublished) {
+    return res.send(renderWebhookPage('approved', 'Este contenido ya estaba publicado. No se ha vuelto a publicar.'));
+  }
+
+  // Determinar plataformas pendientes (si ya se publicó una en intento previo, solo intentamos la restante)
+  const defaultPlatforms = ['instagram', 'facebook'];
+  const pending = defaultPlatforms.filter(p => !publishedTo[p]);
+
+  if (pending.length === 0) {
     return res.send(renderWebhookPage('approved', 'Este contenido ya estaba publicado. No se ha vuelto a publicar.'));
   }
 
@@ -895,21 +1283,42 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
       botStateService.releaseApprovalPublishClaim(postId);
       return res.send(renderWebhookPage('error', 'No hay contenido visual/vídeo para publicar.'));
     }
-    await publishingService.publishViaBridge(
+
+    const publishOpts = {
+      platforms: pending,
+      ...(job.options || {})
+    };
+
+    const result = await publishingService.publishViaBridge(
       job.path,
       job.type,
       job.type === 'story' ? (job.extra || 'IMAGE') : caption,
       fbCaption,
-      job.options || {}
+      publishOpts
     );
 
-    const now = new Date().toISOString();
+    // Caso a: Fallo total (!result.success)
+    if (!result.success) {
+      botStateService.releaseApprovalPublishClaim(postId);
+      const errMsg = result.error || 'Fallo al publicar en las redes seleccionadas.';
+      return res.send(renderWebhookPage('error', `Error al publicar: ${errMsg}. Puedes reintentar el enlace.`));
+    }
+
+    // Persistir el resultado unificado
+    const applied = applyPublishResult(post, result);
+
+    // Caso b: Éxito parcial (alguna red falló o aún quedan redes pendientes por completar)
+    if (result.partial || !applied.allCompleted) {
+      botStateService.releaseApprovalPublishClaim(postId);
+      const successfulNets = Object.keys(applied.nextPublishedTo).filter(k => applied.nextPublishedTo[k]).join(', ');
+      const remainingNets = defaultPlatforms.filter(k => !applied.nextPublishedTo[k]).join(', ');
+      return res.send(renderWebhookPage('error', `Publicado parcialmente en: ${successfulNets}. Pendiente: ${remainingNets}. Puedes volver a abrir el enlace para reintentar la red pendiente.`));
+    }
+
+    // Caso c: Éxito total
     botStateService.markApprovalPublished(postId);
-    postService.update(postId, {
-      publishedAt: now,
-      publishedTo: { instagram: now, facebook: now }
-    });
-    res.send(renderWebhookPage('approved', '¡Contenido aprobado y enviado a publicación (IG + FB)!'));
+    return res.send(renderWebhookPage('approved', '¡Contenido aprobado y publicado exitosamente en Instagram y Facebook!'));
+
   } catch (e) {
     console.error('[Webhook] Error publicando:', e.message);
     botStateService.releaseApprovalPublishClaim(postId);
@@ -921,13 +1330,19 @@ app.get('/api/webhooks/approve/:postId', async (req, res) => {
 
 app.get('/api/webhooks/reject/:postId', async (req, res) => {
   const { postId } = req.params;
-  console.log(`\x1b[31m[Webhook] ❌ Post ${postId} RECHAZADO. Regenerando...\x1b[0m`);
 
   const post = postService.getAll().find(p => p.id === postId);
   if (!post) return res.send(renderWebhookPage('error', 'Post no encontrado.'));
 
+  if (!post.approvalToken || req.query.token !== post.approvalToken) {
+    return res.status(403).send(renderWebhookPage('error', 'Acceso no autorizado: Token de aprobación inválido o ausente.'));
+  }
+
+  console.log(`\x1b[31m[Webhook] ❌ Post ${postId} RECHAZADO. Regenerando...\x1b[0m`);
+
   const claimStatus = botStateService.getPublishClaimStatus(postId);
-  if (post.publishedAt || claimStatus === 'published' || claimStatus === 'publishing') {
+  const hasAnyPublishedNetwork = post.publishedTo && Object.values(post.publishedTo).some(Boolean);
+  if (post.publishedAt || hasAnyPublishedNetwork || claimStatus === 'published' || claimStatus === 'publishing') {
     return res.send(renderWebhookPage('error', 'Este contenido ya se está publicando o ya fue publicado. No se puede rechazar.'));
   }
 
@@ -944,25 +1359,154 @@ app.get('/api/webhooks/reject/:postId', async (req, res) => {
 /**
  * Renderiza una pequeña página de confirmación tras el clic en el email.
  */
+
+function renderReviewPage(post, token) {
+  const igCopy = post.content?.instagram?.copy || post.content?.text || '';
+  const visualUrl = (post.visuals && post.visuals[0]) || post.video?.url || '';
+  const isVideo = Boolean(post.video);
+
+  return `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8">
+      <title>Revisión Editorial - Helpmeagro</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body { margin: 0; background: #0a0a0f; font-family: 'Segoe UI', Roboto, sans-serif; color: #f0f0f5; padding: 24px; display: flex; justify-content: center; }
+        .container { max-width: 680px; width: 100%; background: #131320; border: 1px solid #2a2a40; border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        h1 { font-size: 24px; color: #00e676; margin-top: 0; }
+        .meta-tag { display: inline-block; background: #1e1e36; color: #82b1ff; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+        .preview-box { background: #0a0a14; border: 1px solid #1f1f33; border-radius: 12px; padding: 18px; margin-bottom: 24px; }
+        .preview-media { text-align: center; margin-bottom: 16px; }
+        .preview-media img, .preview-media video { max-width: 100%; max-height: 400px; border-radius: 8px; border: 1px solid #2a2a40; }
+        .copy-box { white-space: pre-wrap; font-size: 14px; line-height: 1.6; color: #ddd; background: #16162a; padding: 12px; border-radius: 8px; margin-top: 8px; }
+        .actions { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+        button { cursor: pointer; border: none; font-size: 15px; font-weight: 600; padding: 14px 22px; border-radius: 10px; transition: all 0.2s ease; }
+        .btn-publish { background: #00e676; color: #000; flex: 1; }
+        .btn-publish:hover { background: #00c853; }
+        .btn-schedule { background: #2979ff; color: #fff; flex: 1; }
+        .btn-schedule:hover { background: #1565c0; }
+        .btn-reject { background: #ff5252; color: #fff; padding: 14px 20px; text-decoration: none; border-radius: 10px; font-size: 15px; font-weight: 600; display: inline-block; text-align: center; }
+        .btn-reject:hover { background: #d50000; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <span class="meta-tag">${(post.contentType || 'Publicación').toUpperCase()}</span>
+        <h1>Revisión de Contenido Programado</h1>
+        <p style="color: #aaa; margin-top: -8px;">Comprueba el material antes de confirmar su publicación.</p>
+        
+        <div class="preview-box">
+          <div class="preview-media">
+            ${isVideo 
+              ? `<video src="${visualUrl}" controls poster="${visualUrl}.thumb.jpg"></video>`
+              : visualUrl ? `<img src="${visualUrl}" alt="Previsualización">` : '<p style="color: #666;">Sin imagen adjunta</p>'}
+          </div>
+          <strong>Texto para Instagram:</strong>
+          <div class="copy-box">${igCopy || 'Sin texto'}</div>
+        </div>
+
+        <form method="POST" action="/api/webhooks/approve/${post.id}?token=${encodeURIComponent(token)}">
+          <div class="actions">
+            <button type="submit" name="mode" value="immediate" class="btn-publish">🚀 Aprobar y Publicar Ahora</button>
+            <button type="submit" name="mode" value="scheduled" class="btn-schedule">📅 Aprobar para Fecha Programada</button>
+            <a href="/api/webhooks/reject/${post.id}?token=${encodeURIComponent(token)}" class="btn-reject">❌ Rechazar</a>
+          </div>
+        </form>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 function renderWebhookPage(type, message) {
   const colors = { approved: '#00c853', rejected: '#ff1744', error: '#ff9100' };
   const icons = { approved: '✅', rejected: '🔄', error: '⚠️' };
+  const safeMessage = String(message || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
   return `
     <!DOCTYPE html><html><head><meta charset="utf-8">
     <style>body{margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#0a0a0f;font-family:'Segoe UI',sans-serif;color:#fff;}
     .card{text-align:center;padding:60px;border-radius:20px;background:#12121f;border:1px solid ${colors[type]};box-shadow:0 0 40px ${colors[type]}33;}
     h1{font-size:60px;margin:0;}p{font-size:18px;color:#aaa;margin-top:15px;}</style>
-    </head><body><div class="card"><h1>${icons[type]}</h1><p>${message}</p></div></body></html>
+    </head><body><div class="card"><h1>${icons[type]}</h1><p>${safeMessage}</p></div></body></html>
   `;
 }
 
 /**
  * Arranque del servidor
  */
-app.listen(PORT, () => {
-  const publicUrl = (process.env.SERVER_URL || 'http://localhost:3001').trim();
-  console.log(`\n\x1b[32m[Server] ✅ Corriendo en http://localhost:${PORT}\x1b[0m`);
-  console.log(`\x1b[32m[Server] 🌐 URL Pública detectada: ${publicUrl}\x1b[0m`);
-  console.log(`\x1b[32m[Server] 🔍 Grounding activo.\x1b[0m\n`);
-  scheduler.start();
-});
+let serverInstance = null;
+if (require.main === module) {
+  serverInstance = app.listen(PORT, () => {
+    const publicUrl = (process.env.SERVER_URL || 'http://localhost:3001').trim();
+    console.log(`\n\x1b[32m[Server] ✅ Corriendo en http://localhost:${PORT}\x1b[0m`);
+    console.log(`\x1b[32m[Server] 🌐 URL Pública detectada: ${publicUrl}\x1b[0m`);
+    console.log(`\x1b[32m[Server] 🔍 Grounding activo.\x1b[0m\n`);
+    scheduler.start();
+  });
+}
+
+/**
+ * Coherencia horaria (Europe/Madrid):
+ * Calcula componentes y representaciones de día, mes y año de negocio en "Europe/Madrid".
+ * @param {Date|string|number} [date=new Date()]
+ */
+function getBusinessDateMadrid(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Madrid',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  const parts = formatter.formatToParts(d).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+
+  const year = parseInt(parts.year, 10);
+  const month = parseInt(parts.month, 10);
+  const day = parseInt(parts.day, 10);
+  const hour = parseInt(parts.hour, 10);
+  const minute = parseInt(parts.minute, 10);
+  const second = parseInt(parts.second, 10);
+  const isoDateString = `${parts.year}-${parts.month}-${parts.day}`;
+  const monthKey = `${parts.year}-${parts.month}`;
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    isoDateString,
+    monthKey,
+    formattedMadrid: d.toLocaleDateString('es-ES', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'Europe/Madrid'
+    })
+  };
+}
+
+module.exports = {
+  app,
+  applyPublishResult,
+  activePublishLocks,
+  renderWebhookPage,
+  serverInstance,
+  getBusinessDateMadrid,
+  experimentService
+};

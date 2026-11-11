@@ -8,6 +8,11 @@ const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v)(?:$|\?)/i;
  * Credenciales vía .env (tokens de acceso), sin OAuth.
  */
 class PublishingService {
+  constructor(deps = {}) {
+    this.instagramPublisher = deps.instagramPublisher || instagramPublisher;
+    this.facebookPublisher = deps.facebookPublisher || facebookPublisher;
+  }
+
   isVideoUrl(url) {
     return typeof url === 'string' && VIDEO_EXT_RE.test(url);
   }
@@ -67,6 +72,46 @@ class PublishingService {
     return { localPath, type };
   }
 
+  _normalizePlatformResult(rawResult, requested) {
+    if (!requested) {
+      return {
+        success: false,
+        postId: null,
+        error: null,
+        mock: false,
+        skipped: true,
+        message: 'Plataforma no solicitada.'
+      };
+    }
+
+    if (!rawResult) {
+      return {
+        success: false,
+        postId: null,
+        error: 'Sin respuesta del publicador.',
+        mock: false,
+        skipped: false
+      };
+    }
+
+    const success = rawResult.success === true;
+    const postId = success ? (rawResult.postId || rawResult.id || null) : null;
+    const mock = Boolean(rawResult.mock);
+    const skipped = Boolean(rawResult.skipped);
+    const error = success
+      ? null
+      : (rawResult.error || (mock ? (rawResult.message || 'Credenciales no configuradas.') : 'Error en la publicación.'));
+
+    return {
+      success,
+      postId,
+      error,
+      mock,
+      skipped,
+      ...(rawResult.message ? { message: rawResult.message } : {})
+    };
+  }
+
   /**
    * @param {string|string[]} localPath
    * @param {string} type 'image' | 'story' | 'reel' | 'carousel'
@@ -98,7 +143,9 @@ class PublishingService {
     };
 
     const igConfigured = !!(process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_ACCOUNT_ID);
-    const fbConfigured = facebookPublisher.isConfigured();
+    const fbConfigured = typeof this.facebookPublisher.isConfigured === 'function'
+      ? this.facebookPublisher.isConfigured()
+      : false;
 
     const igCaption = type === 'story' ? null : (extra || '');
     const storyMediaType = type === 'story' ? (extra || 'IMAGE') : 'IMAGE';
@@ -112,13 +159,13 @@ class PublishingService {
           if (Array.isArray(localPath)) {
             const imageUrls = localPath.map(toPublicUrl);
             console.log(`[PublishingService] IG carrusel (${imageUrls.length})`);
-            results.instagram = await instagramPublisher.publishCarousel(imageUrls, igCaption);
+            results.instagram = await this.instagramPublisher.publishCarousel(imageUrls, igCaption);
           } else {
             const publicUrl = toPublicUrl(localPath);
             console.log(`[PublishingService] IG ${type}: ${publicUrl}`);
-            if (type === 'story') results.instagram = await instagramPublisher.publishStory(publicUrl, storyMediaType);
-            else if (type === 'reel') results.instagram = await instagramPublisher.publishReel(publicUrl, igCaption);
-            else results.instagram = await instagramPublisher.publishImage(publicUrl, igCaption);
+            if (type === 'story') results.instagram = await this.instagramPublisher.publishStory(publicUrl, storyMediaType);
+            else if (type === 'reel') results.instagram = await this.instagramPublisher.publishReel(publicUrl, igCaption);
+            else results.instagram = await this.instagramPublisher.publishImage(publicUrl, igCaption);
           }
         } catch (e) {
           console.error('[PublishingService] Error IG:', e.message);
@@ -138,16 +185,16 @@ class PublishingService {
           if (Array.isArray(localPath)) {
             const imageUrls = localPath.map(toPublicUrl);
             console.log(`[PublishingService] FB carrusel (${imageUrls.length})`);
-            results.facebook = await facebookPublisher.publishCarousel(imageUrls, fbCaption);
+            results.facebook = await this.facebookPublisher.publishCarousel(imageUrls, fbCaption);
           } else {
             const publicUrl = toPublicUrl(localPath);
             console.log(`[PublishingService] FB ${type}: ${publicUrl}`);
             if (type === 'story') {
-              results.facebook = await facebookPublisher.publishStory(publicUrl, storyMediaType, {
+              results.facebook = await this.facebookPublisher.publishStory(publicUrl, storyMediaType, {
                 asPageStory: facebookAsPageStory
               });
-            } else if (type === 'reel') results.facebook = await facebookPublisher.publishVideo(publicUrl, fbCaption);
-            else results.facebook = await facebookPublisher.publishImage(publicUrl, fbCaption);
+            } else if (type === 'reel') results.facebook = await this.facebookPublisher.publishVideo(publicUrl, fbCaption);
+            else results.facebook = await this.facebookPublisher.publishImage(publicUrl, fbCaption);
           }
         } catch (e) {
           console.error('[PublishingService] Error FB:', e.message);
@@ -161,24 +208,44 @@ class PublishingService {
       results.facebook = { success: false, skipped: true, message: 'Plataforma no solicitada.' };
     }
 
-    const igOk = results.instagram?.success === true;
-    const fbOk = results.facebook?.success === true;
-    const igAttempted = doIg && !results.instagram?.skipped;
-    const fbAttempted = doFb && !results.facebook?.skipped;
-    const bothMock = !!(results.instagram?.mock && results.facebook?.mock);
+    const igResult = this._normalizePlatformResult(results.instagram, doIg);
+    const fbResult = this._normalizePlatformResult(results.facebook, doFb);
+
+    const requestedEntries = [];
+    if (doIg) requestedEntries.push({ platform: 'instagram', res: igResult });
+    if (doFb) requestedEntries.push({ platform: 'facebook', res: fbResult });
+
+    const totalRequested = requestedEntries.length;
+    const successCount = requestedEntries.filter(entry => entry.res.success).length;
+
+    const success = successCount > 0;
+    const allOk = totalRequested > 0 && successCount === totalRequested;
+    const partial = totalRequested > 1 && successCount > 0 && successCount < totalRequested;
+    const bothMock = totalRequested > 0 && requestedEntries.every(entry => entry.res.mock);
+
+    const failedErrors = requestedEntries
+      .filter(entry => !entry.res.success)
+      .map(entry => `${entry.platform}: ${entry.res.error || entry.res.message || 'falló'}`);
+
+    const topLevelError = !success
+      ? (failedErrors.length > 0 ? failedErrors.join(' | ') : 'Ninguna red pudo publicar.')
+      : (partial ? `Publicación parcial (${failedErrors.join(' | ')})` : undefined);
 
     return {
-      success: igOk || fbOk,
-      mock: bothMock && !igOk && !fbOk,
+      success,
+      allOk,
+      partial,
+      mock: bothMock,
       platforms,
-      instagram: results.instagram,
-      facebook: results.facebook,
+      instagram: igResult,
+      facebook: fbResult,
       mediaType: type === 'reel' ? 'reel' : (Array.isArray(localPath) ? 'carousel' : type),
-      error: ((igAttempted && !igOk) && (fbAttempted && !fbOk)) || (!igOk && !fbOk && (igAttempted || fbAttempted))
-        ? (results.instagram?.error || results.facebook?.error || 'Ninguna red pudo publicar.')
-        : undefined
+      error: topLevelError
     };
   }
 }
 
-module.exports = new PublishingService();
+const defaultInstance = new PublishingService();
+defaultInstance.PublishingService = PublishingService;
+
+module.exports = defaultInstance;

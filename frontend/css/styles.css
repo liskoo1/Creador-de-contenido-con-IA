@@ -354,7 +354,9 @@ body {
 
 /* Scrollbars */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-thumb { background: var(--accent); }
+::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); }
+::-webkit-scrollbar-thumb { background: rgba(0, 243, 255, 0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 /* Reference Preview Multi-Card */
 .ref-preview-container {
@@ -590,4 +592,56 @@ body {
 }
 .delete-btn:hover {
   color: #ff0000;
+}
+
+/* ============================================
+   SPINNER DE CARGA PARA BOTONES
+   ============================================ */
+.btn-loading {
+  position: relative;
+  pointer-events: none !important;
+  opacity: 0.85;
+}
+
+.spinner-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(0, 243, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: var(--accent);
+  animation: btn-spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes btn-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+
+/* Botón accesible para abrir vista previa de activo */
+.knowledge-preview-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.knowledge-preview-btn:hover,
+.knowledge-preview-btn:focus-visible {
+  color: var(--accent);
+  outline: none;
+  text-decoration: underline;
 }

@@ -12,35 +12,49 @@
     <div class="app-container">
         <!-- Sidebar Lateral -->
         <aside class="sidebar">
+
             <!-- PRODUCT CONTEXT EDITOR -->
             <div class="product-context-section">
-                <div class="product-context-header" onclick="toggleProductContext()" style="cursor:pointer">
-                    <h3>▶ Product Context</h3>
+                <div class="product-context-header open" onclick="toggleProductContext()" style="cursor:pointer">
+                    <h3>▼ Product Context</h3>
                     <span id="product-context-status" class="product-context-status empty">NO CONFIGURADO</span>
                 </div>
-                <div id="product-context-body" class="product-context-body">
+                <div id="product-context-body" class="product-context-body open">
                 <div class="product-meta-fields">
-                    <div class="product-meta-row">
-                        <div class="product-meta-field">
-                            <label>Producto</label>
-                            <input type="text" id="product-name" placeholder="Nombre del producto/app">
-                        </div>
-                        <div class="product-meta-field">
-                            <label>Industria</label>
-                            <input type="text" id="product-industry" placeholder="Ej: Agricultura, SaaS...">
-                        </div>
+                    <div class="product-meta-field">
+                        <label>Producto</label>
+                        <input type="text" id="product-name" placeholder="Nombre del producto/app">
                     </div>
-                    <div class="product-meta-row">
-                        <div class="product-meta-field">
-                            <label>Website</label>
-                            <input type="text" id="product-website" placeholder="https://...">
-                        </div>
+                    <div class="product-meta-field">
+                        <label>Industria</label>
+                        <input type="text" id="product-industry" placeholder="Ej: Agricultura, SaaS...">
                     </div>
+                    <div class="product-meta-field">
+                        <label>Website</label>
+                        <input type="text" id="product-website" placeholder="https://minegocio.com">
+                    </div>
+                    <button type="button" id="btn-analyze-biz" class="biz-analyze-btn" onclick="startBusinessAnalysis()" title="Analizar sitio web con IA y autocompletar contexto">
+                        ⚡ Analizar mi negocio
+                    </button>
                     <div class="product-meta-field">
                         <label>Hashtags por defecto</label>
                         <input type="text" id="product-hashtags" placeholder="#marca #producto #industria">
                     </div>
                 </div>
+
+                <!-- CONTENEDOR DE PROGRESO DE ANÁLISIS WEB -->
+                <div id="biz-analysis-progress" class="biz-progress-container">
+                    <div class="biz-progress-header">
+                        <span id="biz-progress-status"><span class="spinner-icon"></span> Iniciando navegador seguro...</span>
+                        <button type="button" class="biz-cancel-btn" onclick="cancelBusinessAnalysis()">CANCELAR</button>
+                    </div>
+                    <div class="biz-progress-bar-wrap">
+                        <div id="biz-progress-fill" class="biz-progress-bar-fill"></div>
+                    </div>
+                </div>
+
+                <!-- ALERTA DE ANÁLISIS / CONFLICTO -->
+                <div id="biz-analysis-alert" class="biz-analysis-alert"></div>
                 <div class="product-context-editor">
                     <div class="editor-toolbar">
                         <button class="toolbar-btn" onclick="formatText('bold')" title="Negrita"><b>B</b></button>
@@ -51,6 +65,11 @@
                     <textarea id="product-context-textarea" class="product-context-textarea" 
                         placeholder="Describe aquí tu producto/servicio en detalle. Todo el contenido generado se basará en este contexto.&#10;&#10;Incluye:&#10;- Qué es tu producto&#10;- Para quién es&#10;- Beneficios principales&#10;- Tono de marca&#10;- Palabras clave a usar"></textarea>
                     <div class="product-char-count"><span id="product-char-count">0</span> caracteres</div>
+                <!-- PANEL DE CAPTURAS WEB -->
+                <div id="biz-captures-panel" class="biz-captures-panel" style="display:none;">
+                    <div class="biz-captures-title">📸 CAPTURAS WEB OBTENIDAS</div>
+                    <div id="biz-captures-grid" class="biz-captures-grid"></div>
+                </div>
                 </div>
                 <div class="product-context-actions">
                     <button id="product-context-save-btn" class="product-context-save-btn" onclick="saveProductContext()">GUARDAR CONTEXTO</button>
@@ -108,12 +127,27 @@
                 <button class="format-btn" data-engine="direct">DIRECT AI</button>
             </div>
             <div class="sidebar-header" style="margin-top:15px">
-                <h2>Image Model</h2>
+                <h2>Image Provider</h2>
             </div>
             <div class="format-grid" id="image-model-selector">
-                <button class="format-btn active" data-image-model="google">GEMINI</button>
+                <button class="format-btn active" data-image-model="poe">POE</button>
+                <button class="format-btn" data-image-model="google">GEMINI</button>
                 <button class="format-btn" data-image-model="openai">OPENAI</button>
             </div>
+            <div class="sidebar-header" style="margin-top:15px">
+                <h2>Estrategia Instagram</h2>
+            </div>
+            <select id="instagram-skill-select" style="width:100%; background:var(--surface); color:var(--text); border:1px solid var(--border); padding:8px; border-radius:6px; font-size:0.8rem; margin-bottom:6px;">
+                <option value="auto">🎯 Automático (según formato)</option>
+                <option value="ig-carousel">📑 Carrusel educativo (4:5 / 1:1)</option>
+                <option value="ig-reel">🎬 Guion de Reel táctico (9:16)</option>
+                <option value="ig-caption">✍️ Copy persuasivo / Caption</option>
+                <option value="ig-story">📱 Secuencia de Stories (9:16)</option>
+                <option value="ig-human">🤝 Humanizar tono y cercanía</option>
+                <option value="ig-repurpose">♻️ Reutilizar contenido</option>
+                <option value="ig-audit">📊 Analizar resultados y métricas</option>
+            </select>
+            <button class="hub-btn" onclick="openCaptionReviewerModal()" style="border-color:#b388ff; color:#b388ff; width:100%; font-size:0.75rem; padding:6px; margin-bottom:8px;">🔍 REVISAR TEXTO IG</button>
             <div class="status-panel">
                 <button class="hub-btn archive-btn" onclick="openArchive()">📁 SWARMS ARCHIVE</button>
                 <div class="sidebar-header" style="margin-top:15px">
@@ -141,8 +175,9 @@
                     <div class="autopilot-status" id="autopilot-status">Sistema en espera</div>
                 </div>
                 <div class="autopilot-right">
+                    <button class="autopilot-btn" id="experiments-btn" onclick="openExperimentsModal()">📊 MÉTRICAS & MEMORIA</button>
                     <button class="autopilot-btn" id="calendar-btn" onclick="openCalendar()">📅 CALENDARIO</button>
-                    <button class="autopilot-btn" id="force-plan-btn" onclick="forcePlan()">⚡ GENERAR PLAN</button>
+                    <button class="autopilot-btn" id="force-plan-btn" onclick="forceWeeklyPlan()">⚡ PLAN SEMANAL IA</button>
                 </div>
             </section>
 
@@ -199,6 +234,33 @@
     </div>
 
     <!-- Modal: Archive -->
+
+    <!-- Modal: Visor Individual de Activo (Asset Preview) -->
+    <div id="asset-preview-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="asset-preview-title" tabindex="-1">
+        <div class="modal-content" style="max-width: 800px; width: 90%;">
+            <div class="modal-header">
+                <h2 id="asset-preview-title">VISTA PREVIA DEL ACTIVO</h2>
+                <button class="close-modal" id="close-asset-preview-btn" onclick="closeAssetPreview()" aria-label="Cerrar vista previa">×</button>
+            </div>
+            <div style="padding: 15px 0; text-align: center;">
+                <div id="asset-preview-body" style="min-height: 250px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); border-radius: 8px; margin-bottom: 12px; overflow: hidden;">
+                    <img id="asset-preview-img" src="" alt="Vista previa del activo" style="max-width: 100%; max-height: 480px; object-fit: contain; border-radius: 6px; display: none;">
+                    <div id="asset-preview-fallback" style="padding: 30px; color: var(--text-dim); display: none;">
+                        <span style="font-size: 3rem;">📄</span>
+                        <p style="margin-top: 10px;">Este activo no dispone de vista previa gráfica.</p>
+                    </div>
+                </div>
+                <div id="asset-preview-meta" style="text-align: left; background: var(--surface); padding: 12px; border-radius: 6px; font-size: 0.85rem; border: 1px solid var(--border);">
+                    <div style="margin-bottom: 4px;"><b>Descripción:</b> <span id="asset-preview-desc">-</span></div>
+                    <div style="margin-bottom: 4px;"><b>Archivo:</b> <span id="asset-preview-filename">-</span></div>
+                    <div style="margin-bottom: 4px;"><b>Tipo:</b> <span id="asset-preview-mimetype">-</span></div>
+                    <div id="asset-preview-role-row" style="display:none; margin-bottom: 4px;"><b>Rol:</b> <span id="asset-preview-role">-</span></div>
+                    <div id="asset-preview-source-row" style="display:none;"><b>Origen:</b> <span id="asset-preview-source">-</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="archive-modal" class="modal-overlay">
         <div class="modal-content archive-content">
             <div class="modal-header">
@@ -228,7 +290,36 @@
             </div>
             <div class="calendar-config-panel">
                 <h3>⚙️ Configuración del Auto-Pilot</h3>
-                <p>Selecciona qué tipos de contenido creativos permites que la IA genere en el plan mensual:</p>
+                
+                <div class="planning-mode-box">
+                    <span class="planning-mode-title">MODO DE PLANIFICACIÓN AUTOMÁTICA DEL CALENDARIO:</span>
+                    <div class="planning-mode-radios">
+                        <label class="planning-radio-card" id="label-mode-monthly">
+                            <input type="radio" name="planning-mode" value="monthly" id="mode-monthly" onchange="changePlanningMode('monthly')">
+                            <div class="planning-radio-info">
+                                <b>📅 Plan Mensual Completo</b>
+                                <small>Genera todo el mes el día 1 a las 00:05 según formatos permitidos.</small>
+                            </div>
+                        </label>
+                        <label class="planning-radio-card" id="label-mode-weekly">
+                            <input type="radio" name="planning-mode" value="weekly" id="mode-weekly" onchange="changePlanningMode('weekly')">
+                            <div class="planning-radio-info">
+                                <b>⚡ Plan Semanal Inteligente con IA (Recomendado)</b>
+                                <small>Investigación en internet (tendencias y virales) + memoria histórica cada lunes a las 06:00 AM.</small>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="planning-actions-bar">
+                        <span id="planning-mode-status-text">Modo activo: Cargando...</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="hub-btn" id="btn-run-current-plan" onclick="executeCurrentPlanningMode()">
+                                ⚡ GENERAR PLAN AHORA
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <p style="margin-top: 12px; margin-bottom: 6px;">Selecciona qué tipos de contenido creativos permites que la IA genere en el plan:</p>
                 <div class="config-checkboxes" id="format-checkboxes">
                     <!-- Dinámicamente llenado por app.js -->
                 </div>
@@ -303,6 +394,95 @@
                         <button class="day-editor-btn save-btn" onclick="saveDayEntry()">💾 GUARDAR</button>
                         <button class="day-editor-btn delete-btn" onclick="deleteDayEntry()">🗑️</button>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Modal: Métricas, Experimentos y Memoria -->
+    <div id="experiments-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 900px; width: 95%; max-height: 85vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2>📊 MÉTRICAS, EXPERIMENTOS & MEMORIA HISTÓRICA</h2>
+                <button class="close-modal" onclick="closeExperimentsModal()">×</button>
+            </div>
+            <div style="padding: 10px 0;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;">
+                    <div style="background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
+                        <span style="font-size:0.75rem; color: var(--text-dim);">PUBLICACIONES TOTALES</span>
+                        <div id="exp-total-posts" style="font-size: 1.5rem; font-weight: bold; color: var(--accent);">-</div>
+                    </div>
+                    <div style="background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
+                        <span style="font-size:0.75rem; color: var(--text-dim);">POSTS MEDIDOS</span>
+                        <div id="exp-measured-posts" style="font-size: 1.5rem; font-weight: bold; color: #00e676;">-</div>
+                    </div>
+                    <div style="background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
+                        <span style="font-size:0.75rem; color: var(--text-dim);">ALCANCE MEDIO (REACH)</span>
+                        <div id="exp-avg-reach" style="font-size: 1.5rem; font-weight: bold;">-</div>
+                    </div>
+                    <div style="background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
+                        <span style="font-size:0.75rem; color: var(--text-dim);">SRR MEDIO (GUARDADOS/ALCANCE)</span>
+                        <div id="exp-avg-srr" style="font-size: 1.5rem; font-weight: bold; color: #ff9100;">-</div>
+                    </div>
+                </div>
+
+                <div id="top-performer-box" style="background: rgba(0, 230, 118, 0.08); border: 1px solid #00e676; border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+                    <h3 style="color: #00e676; margin: 0 0 6px 0; font-size: 0.95rem;">🏆 MEJOR CONTENIDO HISTÓRICO</h3>
+                    <div id="top-performer-detail" style="font-size: 0.85rem; color: var(--text);">Cargando rendimiento histórico...</div>
+                </div>
+
+                <h3 style="font-size: 1rem; margin-bottom: 8px;">🧠 Memoria de Contenidos Recientes (Anti-repetición)</h3>
+                <div id="memory-topics-list" style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; max-height: 180px; overflow-y: auto; font-size: 0.82rem; margin-bottom: 20px;">
+                    Cargando memoria...
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="font-size: 1rem; margin: 0;">Historial de Posts & Experimentos</h3>
+                    <button class="hub-btn" onclick="syncAllMetrics()" style="font-size: 0.8rem; padding: 6px 12px;">🔄 SINCRONIZAR MÉTRICAS IG</button>
+                </div>
+                <div id="experiments-table-container" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+                        <thead style="background: var(--surface); position: sticky; top: 0;">
+                            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                                <th style="padding: 8px;">Fecha / ID</th>
+                                <th style="padding: 8px;">Formato</th>
+                                <th style="padding: 8px;">Ángulo / Concepto</th>
+                                <th style="padding: 8px;">Alcance</th>
+                                <th style="padding: 8px;">Guardados</th>
+                                <th style="padding: 8px;">SRR</th>
+                                <th style="padding: 8px;">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="experiments-tbody">
+                            <tr><td colspan="7" style="padding: 12px; text-align: center;">Cargando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Revisor de Copy / Caption Instagram -->
+    <div id="caption-reviewer-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 650px; width: 95%;">
+            <div class="modal-header">
+                <h2>🔍 REVISOR MECÁNICO DE TEXTO IG</h2>
+                <button class="close-modal" onclick="closeCaptionReviewerModal()">×</button>
+            </div>
+            <div style="padding: 15px 0;">
+                <p style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 10px;">
+                    Pega tu texto y hashtags para comprobar longitud en tiempo real, conteo de etiquetas y advertencias antes de publicar.
+                </p>
+                <textarea id="caption-review-input" rows="8" style="width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 0.9rem; resize: vertical;" placeholder="Escribe o pega el texto final de Instagram aquí..."></textarea>
+                <div style="display: flex; gap: 15px; margin-top: 10px; font-size: 0.85rem;">
+                    <div>Caracteres: <b id="caption-char-count">0</b> / 2.200</div>
+                    <div>Hashtags: <b id="caption-tag-count">0</b> (recomendado max 5)</div>
+                </div>
+                <div id="caption-review-warnings" style="margin-top: 10px;"></div>
+                <div style="margin-top: 15px; display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="hub-btn" onclick="pasteFromCurrentPost()" style="font-size: 0.8rem;">📥 PEGAR DEL POST ACTUAL</button>
+                    <button class="hub-btn" onclick="analyzeCaptionInput()" style="background: var(--accent); color: #000; font-weight: bold;">ANALIZAR</button>
                 </div>
             </div>
         </div>

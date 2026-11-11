@@ -1,7 +1,9 @@
 const geminiService = require('../services/geminiService');
 const openaiService = require('../services/openaiService');
+const poeService = require('../services/poeService');
 const skillLoader = require('../core/SkillLoader');
 const productContextService = require('../services/productContextService');
+const instagramSkillsService = require('../services/instagramSkillsService');
 
 /**
  * Clase base para representar a un Agente Especialista.
@@ -101,14 +103,35 @@ class Agent {
   async _executeInternal(input, context = {}) {
     // Ruta directa para generación de imagen pura
     if (this.type === 'image' && context.is_pure_image_request) {
-      if (context.imageModel === 'openai') {
+      if (context.imageModel === 'poe' || context.imageProvider === 'poe') {
+        const ref = (context.referenceImages && context.referenceImages[0]) || context.referenceImagePath || null;
+        return await poeService.generateImage({
+          prompt: input,
+          aspectRatio: context.aspectRatio || '9:16',
+          imageSize: context.imageSize || '1K',
+          referenceImage: ref,
+          mock: Boolean(context.mock)
+        });
+      }
+      if (context.imageModel === 'openai' || context.imageProvider === 'openai') {
         return await openaiService.generateImage(input, context.referenceImages || []);
       }
       return await geminiService.generateImage(input, context.referenceImages || [], context.aspectRatio || null);
     }
 
-    // Ruta directa para generación de vídeo pura (Veo nativo con audio/lip-sync)
+    // Ruta directa para generación de vídeo pura (Veo nativo o Gemini Omni en Poe)
     if (this.type === 'video' && context.is_pure_video_request) {
+      if (context.videoProvider === 'poe' || context.videoModel === 'poe') {
+        const ref = context.referenceImagePath || context.characterLockPath || null;
+        return await poeService.generateVideo({
+          prompt: input,
+          aspectRatio: context.aspectRatio || '9:16',
+          resolution: context.resolution || '720p',
+          task: context.videoTask || 'image_to_video',
+          referenceImage: ref,
+          mock: Boolean(context.mock)
+        });
+      }
       return await geminiService.generateVideoClip(input, context.aspectRatio, {
         referenceImagePath: context.referenceImagePath || context.characterLockPath || null,
         resolution: context.resolution || null,
@@ -120,6 +143,7 @@ class Agent {
     // Ruta con skill: cargar instrucciones y generar texto
     const skillPrompt = await skillLoader.loadSkill(this.skillName);
     const productContextSection = productContextService.getAsPromptSection();
+    const instagramGuidance = await instagramSkillsService.forAgent(this.skillName, context.instagramFormat);
     
     const finalPrompt = `
       INSTRUCCIONES DE LA HABILIDAD:
@@ -132,14 +156,34 @@ class Agent {
       
       CONTEXTO ACTUAL:
       ${JSON.stringify(context, null, 2)}
+
+      ${instagramGuidance}
     `;
 
     if (this.type === 'image') {
-      if (context.imageModel === 'openai') {
+      if (context.imageModel === 'poe' || context.imageProvider === 'poe') {
+        const ref = (context.referenceImages && context.referenceImages[0]) || context.referenceImagePath || null;
+        return await poeService.generateImage({
+          prompt: finalPrompt,
+          aspectRatio: context.aspectRatio || '9:16',
+          imageSize: context.imageSize || '1K',
+          referenceImage: ref,
+          mock: Boolean(context.mock)
+        });
+      }
+      if (context.imageModel === 'openai' || context.imageProvider === 'openai') {
         return await openaiService.generateImage(finalPrompt, context.referenceImages || []);
       }
       return await geminiService.generateImage(finalPrompt, context.referenceImages || [], context.aspectRatio || null);
     } else if (this.type === 'video') {
+      if (context.videoProvider === 'poe' || context.videoModel === 'poe') {
+        return await poeService.generateVideo({
+          prompt: finalPrompt,
+          aspectRatio: context.aspectRatio || '9:16',
+          resolution: context.resolution || '720p',
+          mock: Boolean(context.mock)
+        });
+      }
       return await geminiService.generateVideoClip(finalPrompt);
     } else {
       // Si el contexto pide Grounding (Google Search), usarlo

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const POSTS_PATH = path.join(__dirname, '../data/posts.json');
 const OUTPUT_DIR = path.join(__dirname, '../output');
@@ -18,7 +19,18 @@ class PostService {
   getAll() {
     try {
       const data = fs.readFileSync(POSTS_PATH, 'utf8');
-      return JSON.parse(data);
+      const posts = JSON.parse(data);
+      let mutated = false;
+      for (const p of posts) {
+        if (!p.approvalToken) {
+          p.approvalToken = crypto.randomUUID();
+          mutated = true;
+        }
+      }
+      if (mutated) {
+        fs.writeFileSync(POSTS_PATH, JSON.stringify(posts, null, 2));
+      }
+      return posts;
     } catch (e) {
       return [];
     }
@@ -29,7 +41,8 @@ class PostService {
     const newPost = {
       id: Date.now().toString(),
       timestamp: new Date().toISOString(),
-      ...post
+      ...post,
+      approvalToken: (post && post.approvalToken) || crypto.randomUUID()
     };
     posts.unshift(newPost);
     fs.writeFileSync(POSTS_PATH, JSON.stringify(posts, null, 2));
@@ -44,6 +57,30 @@ class PostService {
     const idx = posts.findIndex(p => p.id === id);
     if (idx === -1) return null;
     posts[idx] = { ...posts[idx], ...updates };
+    fs.writeFileSync(POSTS_PATH, JSON.stringify(posts, null, 2));
+    return posts[idx];
+  }
+
+  /**
+   * Actualiza el objeto de métricas de un post y persiste en posts.json.
+   * @param {string} id - ID del post.
+   * @param {object} metricsData - Datos de métricas a fusionar/actualizar.
+   * @returns {object|null} - Post actualizado o null si no se encuentra.
+   */
+  updateMetrics(id, metricsData) {
+    const posts = this.getAll();
+    const idx = posts.findIndex(p => p.id === id);
+    if (idx === -1) return null;
+
+    const existingMetrics = (posts[idx].metrics && typeof posts[idx].metrics === 'object')
+      ? posts[idx].metrics
+      : {};
+
+    posts[idx].metrics = {
+      ...existingMetrics,
+      ...(metricsData || {})
+    };
+
     fs.writeFileSync(POSTS_PATH, JSON.stringify(posts, null, 2));
     return posts[idx];
   }

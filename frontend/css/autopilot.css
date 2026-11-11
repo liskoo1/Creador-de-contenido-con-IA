@@ -617,3 +617,110 @@
 .primary-btn.publish-both {
   background: linear-gradient(135deg, #833ab4, #1877f2);
 }
+
+/* ============================================
+   SELECTOR DE MODO DE PLANIFICACIÓN (MENSUAL / SEMANAL)
+   ============================================ */
+.planning-mode-box {
+  background: rgba(0, 243, 255, 0.03);
+  border: 1px solid rgba(0, 243, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.planning-mode-title {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.planning-mode-radios {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.planning-radio-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.planning-radio-card:hover {
+  border-color: var(--accent);
+  background: rgba(0, 243, 255, 0.06);
+}
+
+.planning-radio-card.active {
+  border-color: var(--accent);
+  background: rgba(0, 243, 255, 0.1);
+  box-shadow: 0 0 12px rgba(0, 243, 255, 0.15);
+}
+
+.planning-radio-card input[type="radio"] {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.planning-radio-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.planning-radio-info b {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: #fff;
+}
+
+.planning-radio-info small {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.planning-actions-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+#planning-mode-status-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+#btn-run-current-plan {
+  font-size: 0.68rem;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: rgba(0, 243, 255, 0.1);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+#btn-run-current-plan:hover {
+  background: var(--accent);
+  color: #000;
+  box-shadow: 0 0 10px rgba(0, 243, 255, 0.4);
+}
