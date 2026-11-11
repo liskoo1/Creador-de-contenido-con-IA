@@ -105,6 +105,18 @@ class AgroImageService {
     return list[n % list.length];
   }
 
+  _resolveImageProvider() {
+    const envMedia = (process.env.MEDIA_PROVIDER || '').trim().toLowerCase();
+    const envImage = (process.env.IMAGE_PROVIDER || '').trim().toLowerCase();
+    if (envMedia === 'poe' || envImage === 'poe') {
+      return 'poe';
+    }
+    if (envMedia === 'openai' || envImage === 'openai') {
+      return 'openai';
+    }
+    return 'google';
+  }
+
   async generatePriceCardImage(prices) {
     if (!prices || prices.length === 0) {
       throw new Error('No hay precios para generar la imagen.');
@@ -140,8 +152,24 @@ class AgroImageService {
       cardsText
     });
 
-    const result = await geminiService.generateImage(prompt);
-    if (!result) throw new Error('Gemini no pudo generar la imagen de precios.');
+    const provider = this._resolveImageProvider();
+    let result = null;
+    if (provider === 'poe') {
+      const poeService = require('./poeService');
+      result = await poeService.generateImage({
+        prompt,
+        aspectRatio: '9:16',
+        imageSize: '1K'
+      });
+      if (!result) throw new Error('Poe no pudo generar la imagen de precios.');
+    } else if (provider === 'openai') {
+      const openaiService = require('./openaiService');
+      result = await openaiService.generateImage(prompt, []);
+      if (!result) throw new Error('OpenAI no pudo generar la imagen de precios.');
+    } else {
+      result = await geminiService.generateImage(prompt, [], '9:16');
+      if (!result) throw new Error('Gemini no pudo generar la imagen de precios.');
+    }
     return result;
   }
 
@@ -224,10 +252,27 @@ IMPORTANTE:
     console.log(`[AgroImage] Plantilla noticia: ${template.id}`);
     const prompt = template.prompt(titulo, footerLine);
 
-    // 1:1 fijo para posts de noticia. Si Gemini bloquea la foto de referencia
-    // (p.ej. político / persona real → IMAGE_OTHER), generateImage reintenta sin ella.
-    const result = await geminiService.generateImage(prompt, referenceImages, '1:1');
-    if (!result) throw new Error('Gemini no pudo generar la imagen de la noticia.');
+    // Si Gemini bloquea la foto de referencia (p.ej. político / persona real → IMAGE_OTHER), generateImage reintenta sin ella.
+    const provider = this._resolveImageProvider();
+    let result = null;
+    if (provider === 'poe') {
+      const poeService = require('./poeService');
+      const refPath = referenceImages.length > 0 ? referenceImages[0].absolutePath : null;
+      result = await poeService.generateImage({
+        prompt,
+        aspectRatio: '1:1',
+        imageSize: '1K',
+        referenceImage: refPath
+      });
+      if (!result) throw new Error('Poe no pudo generar la imagen de la noticia.');
+    } else if (provider === 'openai') {
+      const openaiService = require('./openaiService');
+      result = await openaiService.generateImage(prompt, referenceImages);
+      if (!result) throw new Error('OpenAI no pudo generar la imagen de la noticia.');
+    } else {
+      result = await geminiService.generateImage(prompt, referenceImages, '1:1');
+      if (!result) throw new Error('Gemini no pudo generar la imagen de la noticia.');
+    }
     return result;
   }
 

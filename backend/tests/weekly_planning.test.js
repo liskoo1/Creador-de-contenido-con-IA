@@ -6,6 +6,8 @@ const scheduler = require('../automation/scheduler');
 const orchestrator = require('../core/AgentOrchestrator');
 const experimentService = require('../services/experimentService');
 const postService = require('../services/postService');
+const agroImageService = require('../services/agroImageService');
+const Agent = require('../agents/Agent');
 
 describe('WEEKLY-001: Planificación Semanal Basada en Métricas y Conmutación de Proveedor', () => {
 
@@ -48,6 +50,32 @@ describe('WEEKLY-001: Planificación Semanal Basada en Métricas y Conmutación 
       const { resolvedImage, resolvedVideo } = orchestrator._resolveMediaProviders();
       assert.equal(resolvedImage, 'poe');
       assert.equal(resolvedVideo, 'google');
+    });
+
+    test('d) agroImageService y Agent resuelven Poe para imágenes y vídeos cuando MEDIA_PROVIDER=poe', () => {
+      process.env.MEDIA_PROVIDER = 'poe';
+      delete process.env.IMAGE_PROVIDER;
+      delete process.env.VIDEO_PROVIDER;
+
+      assert.equal(agroImageService._resolveImageProvider(), 'poe');
+
+      const testAgent = new Agent('TestDesigner', 'visual-designer', 'image');
+      const { imageProvider, videoProvider } = testAgent._resolveMediaProviders({});
+      assert.equal(imageProvider, 'poe');
+      assert.equal(videoProvider, 'poe');
+    });
+
+    test('e) agroImageService y Agent resuelven Google para imágenes y vídeos cuando MEDIA_PROVIDER=google', () => {
+      process.env.MEDIA_PROVIDER = 'google';
+      delete process.env.IMAGE_PROVIDER;
+      delete process.env.VIDEO_PROVIDER;
+
+      assert.equal(agroImageService._resolveImageProvider(), 'google');
+
+      const testAgent = new Agent('TestDesigner', 'visual-designer', 'image');
+      const { imageProvider, videoProvider } = testAgent._resolveMediaProviders({});
+      assert.equal(imageProvider, 'google');
+      assert.equal(videoProvider, 'google');
     });
   });
 

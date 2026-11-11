@@ -65,7 +65,7 @@ class AgentOrchestrator {
     return { resolvedImage, resolvedVideo };
   }
 
-  async runFullWorkflow(briefing, brandContext, contentType, mediaType, aspectRatio = '1:1', externalReferences = [], refMode = 'reference', engineMode = 'remotion', imageModel = 'google', projectId = null, videoProvider = null) {
+  async runFullWorkflow(briefing, brandContext, contentType, mediaType, aspectRatio = '1:1', externalReferences = [], refMode = 'reference', engineMode = 'remotion', imageModel = 'default', projectId = null, videoProvider = null) {
     const { resolvedImage, resolvedVideo } = this._resolveMediaProviders(imageModel, videoProvider);
     imageModel = resolvedImage;
     const resolvedVideoProvider = resolvedVideo;
@@ -356,7 +356,8 @@ Devuelve JSON:
             aspectRatio: aspectRatio,
             referenceImagePath: singleLock || null,
             personGeneration: 'allow_adult',
-            videoTask: singleLock ? 'reference_to_video' : 'text_to_video'
+            videoTask: singleLock ? 'reference_to_video' : 'text_to_video',
+            videoProvider: resolvedVideoProvider
           });
           if (videoData && videoData.url) {
             // Direct: publicar el MP4 de Veo sin Remotion (preserva audio/lip-sync)
@@ -510,7 +511,8 @@ Devuelve JSON:
               aspectRatio,
               referenceImagePath: characterLockPath || null,
               personGeneration: 'allow_adult',
-              videoTask: characterLockPath ? 'reference_to_video' : 'text_to_video'
+              videoTask: characterLockPath ? 'reference_to_video' : 'text_to_video',
+              videoProvider: resolvedVideoProvider
             });
             resultsByIndex[i] = data;
             console.log(`[Remotion] Telemetría escena ${i + 1}: hasAudio=${data?.hasAudio} dialog=${!!sp.spokenDialog} ref=${!!characterLockPath}`);
@@ -534,7 +536,8 @@ Devuelve JSON:
                   aspectRatio,
                   referenceImagePath: characterLockPath || null,
                   personGeneration: characterLockPath ? 'allow_adult' : null,
-                  videoTask: characterLockPath ? 'reference_to_video' : 'text_to_video'
+                  videoTask: characterLockPath ? 'reference_to_video' : 'text_to_video',
+              videoProvider: resolvedVideoProvider
                 });
                 console.log(`[Remotion] Telemetría escena ${i + 1}: hasAudio=${data?.hasAudio} dialog=false ref=${!!characterLockPath}`);
                 return { index: i, data };
@@ -720,7 +723,9 @@ Devuelve JSON:
    * Workflow especializado para Audio Reel.
    * Transcribe audio → segmenta escenas → genera imágenes → monta con Remotion.
    */
-  async runAudioReelWorkflow(audioPath, aspectRatio = '9:16', imageModel = 'google') {
+  async runAudioReelWorkflow(audioPath, aspectRatio = '9:16', imageModel = 'default') {
+    const { resolvedImage } = this._resolveMediaProviders(imageModel);
+    imageModel = resolvedImage;
     const geminiService = require('../services/geminiService');
     
     let projectState = {
@@ -1085,7 +1090,9 @@ RULES: Keep spokenDialog exact if present. Respect CHARACTER LOCK and visualDire
   /**
    * Genera imagen ancla del personaje para consistencia entre clips Veo.
    */
-  async _generateCharacterLock(characterProfile, aspectRatio = '9:16', imageModel = 'google') {
+  async _generateCharacterLock(characterProfile, aspectRatio = '9:16', imageModel = 'default') {
+    const { resolvedImage } = this._resolveMediaProviders(imageModel);
+    imageModel = resolvedImage;
     try {
       const prompt = `Photorealistic portrait reference sheet of: ${characterProfile}. Neutral background, soft studio light, looking at camera, shoulders-up, consistent identity reference photo, no text, no logos.`;
       let img = null;

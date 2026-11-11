@@ -100,10 +100,42 @@ class Agent {
     throw lastError;
   }
 
+  _resolveMediaProviders(context = {}) {
+    const envMedia = (process.env.MEDIA_PROVIDER || '').trim().toLowerCase();
+    const envImage = (process.env.IMAGE_PROVIDER || '').trim().toLowerCase();
+    const envVideo = (process.env.VIDEO_PROVIDER || '').trim().toLowerCase();
+
+    let imageProvider = context.imageModel || context.imageProvider;
+    if (!imageProvider || imageProvider === 'default') {
+      if (envMedia === 'poe' || envImage === 'poe') {
+        imageProvider = 'poe';
+      } else if (envMedia === 'openai' || envImage === 'openai') {
+        imageProvider = 'openai';
+      } else {
+        imageProvider = 'google';
+      }
+    }
+
+    let videoProvider = context.videoProvider || context.videoModel;
+    if (!videoProvider || videoProvider === 'default') {
+      if (envMedia === 'poe' || envVideo === 'poe') {
+        videoProvider = 'poe';
+      } else if (envMedia === 'google' || envVideo === 'google') {
+        videoProvider = 'google';
+      } else {
+        videoProvider = (imageProvider === 'poe' ? 'poe' : 'google');
+      }
+    }
+
+    return { imageProvider, videoProvider };
+  }
+
   async _executeInternal(input, context = {}) {
+    const { imageProvider, videoProvider } = this._resolveMediaProviders(context);
+
     // Ruta directa para generación de imagen pura
     if (this.type === 'image' && context.is_pure_image_request) {
-      if (context.imageModel === 'poe' || context.imageProvider === 'poe') {
+      if (imageProvider === 'poe') {
         const ref = (context.referenceImages && context.referenceImages[0]) || context.referenceImagePath || null;
         return await poeService.generateImage({
           prompt: input,
@@ -113,7 +145,7 @@ class Agent {
           mock: Boolean(context.mock)
         });
       }
-      if (context.imageModel === 'openai' || context.imageProvider === 'openai') {
+      if (imageProvider === 'openai') {
         return await openaiService.generateImage(input, context.referenceImages || []);
       }
       return await geminiService.generateImage(input, context.referenceImages || [], context.aspectRatio || null);
@@ -121,7 +153,7 @@ class Agent {
 
     // Ruta directa para generación de vídeo pura (Veo nativo o Gemini Omni en Poe)
     if (this.type === 'video' && context.is_pure_video_request) {
-      if (context.videoProvider === 'poe' || context.videoModel === 'poe') {
+      if (videoProvider === 'poe') {
         const ref = context.referenceImagePath || context.characterLockPath || null;
         return await poeService.generateVideo({
           prompt: input,
@@ -161,7 +193,7 @@ class Agent {
     `;
 
     if (this.type === 'image') {
-      if (context.imageModel === 'poe' || context.imageProvider === 'poe') {
+      if (imageProvider === 'poe') {
         const ref = (context.referenceImages && context.referenceImages[0]) || context.referenceImagePath || null;
         return await poeService.generateImage({
           prompt: finalPrompt,
@@ -171,12 +203,12 @@ class Agent {
           mock: Boolean(context.mock)
         });
       }
-      if (context.imageModel === 'openai' || context.imageProvider === 'openai') {
+      if (imageProvider === 'openai') {
         return await openaiService.generateImage(finalPrompt, context.referenceImages || []);
       }
       return await geminiService.generateImage(finalPrompt, context.referenceImages || [], context.aspectRatio || null);
     } else if (this.type === 'video') {
-      if (context.videoProvider === 'poe' || context.videoModel === 'poe') {
+      if (videoProvider === 'poe') {
         return await poeService.generateVideo({
           prompt: finalPrompt,
           aspectRatio: context.aspectRatio || '9:16',

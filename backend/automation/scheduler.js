@@ -513,9 +513,11 @@ class Scheduler {
     try {
       const brandContext = knowledgeService.getAllAsText();
       const mediaType = entry.mediaType || (entry.format === 'video' ? 'video' : 'image');
-      const envMedia = (process.env.MEDIA_PROVIDER || process.env.IMAGE_PROVIDER || '').trim().toLowerCase();
-      const resolvedImageModel = (envMedia === 'google' ? 'google' : 'poe');
-      const resolvedVideoProvider = (process.env.MEDIA_PROVIDER || process.env.VIDEO_PROVIDER || '').trim().toLowerCase() === 'google' ? 'google' : 'poe';
+      const envMedia = (process.env.MEDIA_PROVIDER || '').trim().toLowerCase();
+      const envImage = (process.env.IMAGE_PROVIDER || '').trim().toLowerCase();
+      const envVideo = (process.env.VIDEO_PROVIDER || '').trim().toLowerCase();
+      const resolvedImageModel = (envMedia === 'google' || envImage === 'google') ? 'google' : (envMedia === 'poe' || envImage === 'poe' ? 'poe' : 'google');
+      const resolvedVideoProvider = (envMedia === 'google' || envVideo === 'google') ? 'google' : (envMedia === 'poe' || envVideo === 'poe' ? 'poe' : 'google');
 
       const result = await orchestrator.runFullWorkflow(
         entry.briefing,
