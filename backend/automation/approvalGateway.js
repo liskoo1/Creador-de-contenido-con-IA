@@ -76,7 +76,7 @@ class ApprovalGateway {
     let videoHtml = '';
 
     // Procesar imágenes (carrusel o imagen única)
-    const visuals = post.visuals || [];
+    const visuals = (post.visuals || []).filter(v => typeof v === 'string' && v.trim().length > 0);
     if (visuals.length > 0) {
       const isCarousel = visuals.length > 1;
       
@@ -145,7 +145,7 @@ class ApprovalGateway {
     }
 
     // Procesar vídeo — solo mostrar enlace para abrir
-    if (post.video && post.video.url) {
+    if (post.video && typeof post.video.url === 'string' && post.video.url.trim().length > 0) {
       const serverVideoUrl = post.video.url.startsWith('http') ? post.video.url : `${serverUrl}${post.video.url.startsWith('/') ? '' : '/'}${post.video.url}`;
 
       videoHtml = `

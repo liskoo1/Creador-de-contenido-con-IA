@@ -77,6 +77,15 @@ describe('WEEKLY-001: Planificación Semanal Basada en Métricas y Conmutación 
       assert.equal(imageProvider, 'google');
       assert.equal(videoProvider, 'google');
     });
+
+    test('f) Agent._assertValidMediaResult rechaza respuestas sin url o con success: false', () => {
+      const testAgent = new Agent('TestDesigner', 'visual-designer', 'image');
+      assert.throws(() => testAgent._assertValidMediaResult({ success: false, error: 'HTTP 400' }, 'Poe', 'imagen'), /HTTP 400/);
+      assert.throws(() => testAgent._assertValidMediaResult({ success: true }, 'Poe', 'imagen'), /no devolvió una URL/);
+      assert.throws(() => testAgent._assertValidMediaResult(null, 'Poe', 'imagen'), /no devolvió una URL/);
+      const ok = testAgent._assertValidMediaResult({ success: true, url: 'http://localhost:3001/output/poe/test.png' }, 'Poe', 'imagen');
+      assert.equal(ok.url, 'http://localhost:3001/output/poe/test.png');
+    });
   });
 
   describe('2. Generación de Calendario Semanal enriquecido con rutinas agro', () => {

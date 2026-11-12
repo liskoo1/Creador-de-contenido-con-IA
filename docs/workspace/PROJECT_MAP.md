@@ -111,8 +111,7 @@ no se ha consultado la cuenta ni comprobado su vigencia en este encargo.
   especialidad backend y revisión; instalación ECC 2.2.3 disponible.
 - MCP Codebase Memory conectado. Proyecto usado:
   `C-Users-luis_-OneDrive-Escritorio-Creador-de-contenido-con-IA`, cuya raíz
-  coincide con este workspace. El identificador antiguo con `Pc-casa-drive`
-  corresponde a otra raíz y no se utilizó para esta exploración.
+  coincide con este workspace.
 - Índice consultado: estado `ready`, 1.058 nodos y 1.971 relaciones. Se usaron
   arquitectura, búsqueda y trazado, contrastando resultados con archivos reales;
   el grafo no recoge necesariamente todas las rutas dinámicas de Express.

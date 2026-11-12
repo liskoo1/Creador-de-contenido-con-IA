@@ -308,6 +308,144 @@ class PoeService {
    * Contrato devuelto: { success, path, url, model, costPoints, width, height, ... }
    */
 
+  /**
+   * Convierte una ruta local o URL localhost a Data URI base64 aceptada por la API de Poe,
+   * preservando URLs HTTP/HTTPS públicas o data: URIs existentes.
+   */
+  _fileToDataUri(filePath) {
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile() || stat.size > 10 * 1024 * 1024) return null;
+      const buffer = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      let mime = 'image/jpeg';
+      if (ext === '.png' || (buffer[0] === 0x89 && buffer[1] === 0x50)) mime = 'image/png';
+      else if (ext === '.webp' || (buffer[0] === 0x52 && buffer[1] === 0x49)) mime = 'image/webp';
+      else if (ext === '.gif' || (buffer[0] === 0x47 && buffer[1] === 0x49)) mime = 'image/gif';
+      return `data:${mime};base64,${buffer.toString('base64')}`;
+    } catch {
+      return null;
+    }
+  }
+
+  _resolveReferenceImageUrl(referenceImage) {
+    if (!referenceImage) return null;
+    let raw = referenceImage;
+    if (typeof raw === 'object') {
+      raw = raw.absolutePath || raw.path || raw.url || null;
+    }
+    if (!raw || typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith('data:')) {
+      return trimmed;
+    }
+
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      try {
+        const u = new URL(trimmed);
+        const h = u.hostname.toLowerCase();
+        if (h !== 'localhost' && h !== '127.0.0.1' && h !== '::1') {
+          return trimmed;
+        }
+        const pathname = u.pathname.replace(/^\/+/, '');
+        const candidate = path.join(__dirname, '..', pathname);
+        if (fs.existsSync(candidate)) {
+          return this._fileToDataUri(candidate);
+        }
+      } catch {
+        return null;
+      }
+      return null;
+    }
+
+    let localPath = trimmed;
+    if (!fs.existsSync(localPath)) {
+      const candidate = path.join(__dirname, '..', trimmed.replace(/^\/+/, ''));
+      if (fs.existsSync(candidate)) {
+        localPath = candidate;
+      } else {
+        return null;
+      }
+    }
+
+    return this._fileToDataUri(localPath);
+  }
+
+  async _requestImageGeneration({ prompt, model, aspectRatio, imageSize, refUrl = null }) {
+    const userContent = [];
+    userContent.push({ type: 'text', text: prompt.trim() });
+    if (refUrl) {
+      userContent.push({
+        type: 'image_url',
+        image_url: { url: refUrl }
+      });
+    }
+
+    const payload = {
+      model,
+      messages: [
+        { role: 'user', content: userContent.length === 1 ? userContent[0].text : userContent }
+      ],
+      stream: false,
+      temperature: 0.7,
+      parameters: {
+        aspect_ratio: aspectRatio,
+        image_size: imageSize
+      }
+    };
+
+    const res = await fetch(`${this.apiBase}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.apiKey.trim()}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60000)
+    });
+
+    if (res.status === 401) {
+      return { success: false, status: 401, error: 'Credencial POE_API_KEY no autorizada (HTTP 401).' };
+    }
+    if (res.status === 402) {
+      return { success: false, status: 402, error: 'Saldo de cuenta Poe insuficiente (HTTP 402).' };
+    }
+    if (res.status === 429) {
+      return { success: false, status: 429, error: 'Límite de peticiones de Poe alcanzado (HTTP 429).' };
+    }
+    if (!res.ok) {
+      const rawErr = await res.text();
+      const errText = rawErr.substring(0, 200);
+      return { success: false, status: res.status, error: `Error de Poe API: HTTP ${res.status} - ${errText}` };
+    }
+
+    const responseData = await res.json();
+    const mediaUrl = this.extractMediaUrl(responseData);
+
+    if (!mediaUrl) {
+      return {
+        success: false,
+        error: 'Poe devolvió respuesta exitosa pero sin medio descargable.',
+        rawResponse: responseData
+      };
+    }
+
+    const downloaded = await this.downloadMediaFile(mediaUrl, '.png');
+    return {
+      success: true,
+      model,
+      path: downloaded.localPath,
+      url: downloaded.publicUrl,
+      aspectRatio,
+      imageSize,
+      remoteUrl: mediaUrl,
+      costPoints: ESTIMATED_IMAGE_POINTS
+    };
+  }
+
   buildImagePayload(prompt, {
     model = this.defaultImageModel,
     aspectRatio = '9:16',
@@ -316,10 +454,11 @@ class PoeService {
   } = {}) {
     const userContent = [];
     userContent.push({ type: 'text', text: String(prompt || '').trim() });
-    if (referenceImage && typeof referenceImage === 'string') {
+    const resolvedRef = this._resolveReferenceImageUrl(referenceImage);
+    if (resolvedRef) {
       userContent.push({
         type: 'image_url',
-        image_url: { url: referenceImage }
+        image_url: { url: resolvedRef }
       });
     }
 
@@ -432,77 +571,15 @@ class PoeService {
     }
 
     try {
-      // Construcción del payload multimodal o textual
-      const userContent = [];
-      userContent.push({ type: 'text', text: prompt.trim() });
-      if (referenceImage && typeof referenceImage === 'string') {
-        userContent.push({
-          type: 'image_url',
-          image_url: { url: referenceImage }
-        });
+      const refUrl = this._resolveReferenceImageUrl(referenceImage);
+      let result = await this._requestImageGeneration({ prompt, model, aspectRatio, imageSize, refUrl });
+
+      if ((!result || !result.success) && refUrl && result?.status !== 401 && result?.status !== 402 && result?.status !== 429) {
+        console.warn(`[PoeService] ⚠️ Generación con imagen de referencia falló (${result?.error || 'sin medio'}). Reintentando solo con prompt...`);
+        result = await this._requestImageGeneration({ prompt, model, aspectRatio, imageSize, refUrl: null });
       }
 
-      const payload = {
-        model,
-        messages: [
-          { role: 'user', content: userContent.length === 1 ? userContent[0].text : userContent }
-        ],
-        stream: false,
-        temperature: 0.7,
-        parameters: {
-          aspect_ratio: aspectRatio,
-          image_size: imageSize
-        }
-      };
-
-      const res = await fetch(`${this.apiBase}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey.trim()}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(60000)
-      });
-
-      if (res.status === 401) {
-        return { success: false, status: 401, error: 'Credencial POE_API_KEY no autorizada (HTTP 401).' };
-      }
-      if (res.status === 402) {
-        return { success: false, status: 402, error: 'Saldo de cuenta Poe insuficiente (HTTP 402).' };
-      }
-      if (res.status === 429) {
-        return { success: false, status: 429, error: 'Límite de peticiones de Poe alcanzado (HTTP 429).' };
-      }
-      if (!res.ok) {
-        const rawErr = await res.text();
-        const errText = rawErr.substring(0, 200);
-        return { success: false, status: res.status, error: `Error de Poe API: HTTP ${res.status} - ${errText}` };
-      }
-
-      const responseData = await res.json();
-      const mediaUrl = this.extractMediaUrl(responseData);
-
-      if (!mediaUrl) {
-        return {
-          success: false,
-          error: 'Poe devolvió respuesta exitosa pero sin medio descargable.',
-          rawResponse: responseData
-        };
-      }
-
-      const downloaded = await this.downloadMediaFile(mediaUrl, '.png');
-      return {
-        success: true,
-        model,
-        path: downloaded.localPath,
-        url: downloaded.publicUrl,
-        aspectRatio,
-        imageSize,
-        remoteUrl: mediaUrl,
-        costPoints: ESTIMATED_IMAGE_POINTS
-      };
+      return result;
     } catch (e) {
       return {
         success: false,
@@ -625,10 +702,11 @@ class PoeService {
     try {
       const userContent = [];
       userContent.push({ type: 'text', text: prompt.trim() });
-      if (referenceImage && typeof referenceImage === 'string') {
+      const resolvedRef = this._resolveReferenceImageUrl(referenceImage);
+      if (resolvedRef) {
         userContent.push({
           type: 'image_url',
-          image_url: { url: referenceImage }
+          image_url: { url: resolvedRef }
         });
       }
 

@@ -131,10 +131,11 @@ class PublishingService {
     const facebookAsPageStory = options.facebookAsPageStory === true;
 
     const toPublicUrl = (p) => {
-      if (typeof p === 'string' && p.startsWith('http') && !p.startsWith('http://localhost')) {
+      if (!p || typeof p !== 'string') return '';
+      if (p.startsWith('http') && !p.startsWith('http://localhost')) {
         return p;
       }
-      if (typeof p === 'string' && p.startsWith('http://localhost')) {
+      if (p.startsWith('http://localhost')) {
         const urlObj = new URL(p);
         return `${serverUrl}${urlObj.pathname}`;
       }

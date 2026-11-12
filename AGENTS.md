@@ -16,7 +16,7 @@ responde con resultados comprobados.
 4. Para explorar código, usar Codebase Memory y contrastar sus resultados con los
    archivos actuales. Elegir el proyecto cuya raíz coincide con este workspace.
    El identificador conocido es
-   `C-Users-luis_-OneDrive-Escritorio-Pc-casa-drive-Creador-de-contenido-con-IA`.
+   `C-Users-luis_-OneDrive-Escritorio-Creador-de-contenido-con-IA`.
 
 ## Delegación y responsabilidad
 

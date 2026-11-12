@@ -130,6 +130,13 @@ class Agent {
     return { imageProvider, videoProvider };
   }
 
+  _assertValidMediaResult(result, provider, mediaLabel = 'medio') {
+    if (!result || result.success === false || !result.url) {
+      throw new Error(result?.error || `${provider} no devolvió una URL de ${mediaLabel} válida.`);
+    }
+    return result;
+  }
+
   async _executeInternal(input, context = {}) {
     const { imageProvider, videoProvider } = this._resolveMediaProviders(context);
 
@@ -137,13 +144,14 @@ class Agent {
     if (this.type === 'image' && context.is_pure_image_request) {
       if (imageProvider === 'poe') {
         const ref = (context.referenceImages && context.referenceImages[0]) || context.referenceImagePath || null;
-        return await poeService.generateImage({
+        const res = await poeService.generateImage({
           prompt: input,
           aspectRatio: context.aspectRatio || '9:16',
           imageSize: context.imageSize || '1K',
           referenceImage: ref,
           mock: Boolean(context.mock)
         });
+        return this._assertValidMediaResult(res, 'Poe', 'imagen');
       }
       if (imageProvider === 'openai') {
         return await openaiService.generateImage(input, context.referenceImages || []);
@@ -155,7 +163,7 @@ class Agent {
     if (this.type === 'video' && context.is_pure_video_request) {
       if (videoProvider === 'poe') {
         const ref = context.referenceImagePath || context.characterLockPath || null;
-        return await poeService.generateVideo({
+        const res = await poeService.generateVideo({
           prompt: input,
           aspectRatio: context.aspectRatio || '9:16',
           resolution: context.resolution || '720p',
@@ -163,6 +171,7 @@ class Agent {
           referenceImage: ref,
           mock: Boolean(context.mock)
         });
+        return this._assertValidMediaResult(res, 'Poe', 'vídeo');
       }
       return await geminiService.generateVideoClip(input, context.aspectRatio, {
         referenceImagePath: context.referenceImagePath || context.characterLockPath || null,
@@ -195,13 +204,14 @@ class Agent {
     if (this.type === 'image') {
       if (imageProvider === 'poe') {
         const ref = (context.referenceImages && context.referenceImages[0]) || context.referenceImagePath || null;
-        return await poeService.generateImage({
+        const res = await poeService.generateImage({
           prompt: finalPrompt,
           aspectRatio: context.aspectRatio || '9:16',
           imageSize: context.imageSize || '1K',
           referenceImage: ref,
           mock: Boolean(context.mock)
         });
+        return this._assertValidMediaResult(res, 'Poe', 'imagen');
       }
       if (imageProvider === 'openai') {
         return await openaiService.generateImage(finalPrompt, context.referenceImages || []);
@@ -209,12 +219,13 @@ class Agent {
       return await geminiService.generateImage(finalPrompt, context.referenceImages || [], context.aspectRatio || null);
     } else if (this.type === 'video') {
       if (videoProvider === 'poe') {
-        return await poeService.generateVideo({
+        const res = await poeService.generateVideo({
           prompt: finalPrompt,
           aspectRatio: context.aspectRatio || '9:16',
           resolution: context.resolution || '720p',
           mock: Boolean(context.mock)
         });
+        return this._assertValidMediaResult(res, 'Poe', 'vídeo');
       }
       return await geminiService.generateVideoClip(finalPrompt);
     } else {

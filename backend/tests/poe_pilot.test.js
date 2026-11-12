@@ -433,5 +433,28 @@ describe('POE-001: Piloto de Contrato y Validación de Poe API', () => {
       assert.equal(payload.resolution, '720p');
       assert.equal(payload.task, 'text_to_video');
     });
+
+    test('f) _resolveReferenceImageUrl convierte rutas locales y objetos a Data URI base64 sin enviar paths locales a Poe', () => {
+      const client = new PoeService({ apiKey: 'test_key' });
+      const tmpImg = path.join(__dirname, 'tmp_ref_test.png');
+      const pngBytes = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2d400000000049454e44ae426082', 'hex');
+      fs.writeFileSync(tmpImg, pngBytes);
+
+      try {
+        const fromPath = client._resolveReferenceImageUrl(tmpImg);
+        assert.ok(fromPath && fromPath.startsWith('data:image/png;base64,'), 'Debe convertir archivo local a Data URI');
+
+        const fromObj = client._resolveReferenceImageUrl({ absolutePath: tmpImg, description: 'test' });
+        assert.ok(fromObj && fromObj.startsWith('data:image/png;base64,'), 'Debe extraer absolutePath de objeto');
+
+        const fromPublic = client._resolveReferenceImageUrl('https://example.com/foto.jpg');
+        assert.equal(fromPublic, 'https://example.com/foto.jpg');
+
+        const fromMissing = client._resolveReferenceImageUrl('C:\\ruta\\inexistente\\no_existe_12345.png');
+        assert.equal(fromMissing, null);
+      } finally {
+        if (fs.existsSync(tmpImg)) fs.unlinkSync(tmpImg);
+      }
+    });
   });
 });

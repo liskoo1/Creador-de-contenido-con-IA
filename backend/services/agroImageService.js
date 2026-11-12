@@ -161,14 +161,16 @@ class AgroImageService {
         aspectRatio: '9:16',
         imageSize: '1K'
       });
-      if (!result) throw new Error('Poe no pudo generar la imagen de precios.');
+      if (!result || result.success === false || !result.url) {
+        throw new Error(result?.error || 'Poe no pudo generar la imagen de precios.');
+      }
     } else if (provider === 'openai') {
       const openaiService = require('./openaiService');
       result = await openaiService.generateImage(prompt, []);
-      if (!result) throw new Error('OpenAI no pudo generar la imagen de precios.');
+      if (!result || !result.url) throw new Error('OpenAI no pudo generar la imagen de precios.');
     } else {
       result = await geminiService.generateImage(prompt, [], '9:16');
-      if (!result) throw new Error('Gemini no pudo generar la imagen de precios.');
+      if (!result || !result.url) throw new Error('Gemini no pudo generar la imagen de precios.');
     }
     return result;
   }
@@ -264,14 +266,16 @@ IMPORTANTE:
         imageSize: '1K',
         referenceImage: refPath
       });
-      if (!result) throw new Error('Poe no pudo generar la imagen de la noticia.');
+      if (!result || result.success === false || !result.url) {
+        throw new Error(result?.error || 'Poe no pudo generar la imagen de la noticia.');
+      }
     } else if (provider === 'openai') {
       const openaiService = require('./openaiService');
       result = await openaiService.generateImage(prompt, referenceImages);
-      if (!result) throw new Error('OpenAI no pudo generar la imagen de la noticia.');
+      if (!result || !result.url) throw new Error('OpenAI no pudo generar la imagen de la noticia.');
     } else {
       result = await geminiService.generateImage(prompt, referenceImages, '1:1');
-      if (!result) throw new Error('Gemini no pudo generar la imagen de la noticia.');
+      if (!result || !result.url) throw new Error('Gemini no pudo generar la imagen de la noticia.');
     }
     return result;
   }

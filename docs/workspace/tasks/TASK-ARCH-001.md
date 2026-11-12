@@ -5,8 +5,8 @@
 - Responsable / especialidad: architect (`project_architect`)
 - Revisor independiente: qa-reviewer (`project_qa_reviewer`)
 - Contexto y evidencia (rutas, símbolos, resultados):
-  - Workspace: `C:/Users/luis_/OneDrive/Escritorio/Pc casa drive/Creador de contenido con IA`
-  - Grafo Codebase Memory: Proyecto `C-Users-luis_-OneDrive-Escritorio-Pc-casa-drive-Creador-de-contenido-con-IA` (626 nodos iniciales, 697 nodos tras actualización, 1.410 aristas)
+  - Workspace: `C:/Users/luis_/OneDrive/Escritorio/Creador de contenido con IA`
+  - Grafo Codebase Memory: Proyecto `C-Users-luis_-OneDrive-Escritorio-Creador-de-contenido-con-IA` (626 nodos iniciales, 697 nodos tras actualización, 1.410 aristas)
   - Módulos principales: `backend/` (Express, core, services, automation), `frontend/` (SPA), `video-engine/` (Remotion).
 - Archivos asignados en exclusiva: Ninguno (tarea de solo lectura y exploración de arquitectura).
 - Dependencias y responsables relacionados: Director técnico (encargo, orquestación y cierre).
